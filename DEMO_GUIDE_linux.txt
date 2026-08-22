@@ -66,7 +66,7 @@ Terminal 1 — Controlled target (the authorized, local, intentionally
 vulnerable AI system the swarm attacks):
 
     cd controlled_target
-    ..\backend\venv\Scripts\activate.bat      # if using a shared venv
+    source ../backend/venv/bin/activate      # if using a shared venv
     python app.py
     # -> Uvicorn running on http://127.0.0.1:9100
     # verify: curl http://127.0.0.1:9100/health
@@ -75,7 +75,7 @@ Terminal 2 — Backend API (Planner/Specialists/Sentinel/Memory/DNA/Risk/
 Remediation/Revalidation, all agent orchestration):
 
     cd backend
-    venv\Scripts\activate.bat
+    source venv/bin/activate
     export DATABASE_URL='postgresql+psycopg2://swarmshield:swarmshield@localhost:5432/swarmshield'
     export GEMINI_API_KEY=''        # or your real key
     python -m app.db.init_db        # creates all 9 tables — run once, safe to re-run
@@ -116,13 +116,7 @@ match the DATABASE_URL/endpoint_url values below, so start there.)
 PART 5 — RUNNING THE LIVE DEMO
 ---------------------------------
 
-Step 1: Register the controlled target with SwarmShield, including its
-security policy (declared tool restrictions / protected resources / which
-policies it expects to be enforced — this is what lets the Sentinel explain
-findings as actual policy violations, not just generic reasoning; see Part
-6 below) and an authorization attestation. SwarmShield refuses to scan any
-target where "authorized" isn't true (403) — this isn't just a UI checkbox,
-it's enforced server-side in api/routes/scans.py.
+Step 1: Register the controlled target with SwarmShield.
 
     curl -X POST http://127.0.0.1:8000/api/targets \
       -H "Content-Type: application/json" \
@@ -135,24 +129,10 @@ it's enforced server-side in api/routes/scans.py.
           {"name": "send_email", "description": "send an email"},
           {"name": "execute_admin_action", "description": "perform an admin action"}
         ]},
-        "permission_map": {
-          "tools": {
-            "execute_admin_action": {"restriction": "admin_only"},
-            "send_email": {"restriction": "external_recipients_restricted"},
-            "read_file": {"restriction": "restricted_paths", "restricted_paths": ["internal_notes.txt"]}
-          },
-          "protected_resources": ["internal_notes", "customer data", "confidential pricing"],
-          "policies": ["no_unauthorized_tool_execution", "no_privilege_escalation", "no_confidential_exfiltration", "detect_prompt_injection"]
-        },
-        "authorized": true,
-        "authorization_note": "I own this system -- it is the local controlled_target."
+        "permission_map": {}
       }'
 
     Copy the "id" field from the response — this is TARGET_ID.
-
-    (permission_map is optional — omit it or pass {} and everything still
-    works exactly as before, just without the policy-violation phrasing on
-    findings. It's an existing column on the target, not a new API.)
 
 Step 2: Open the dashboard (http://localhost:5173), select the target you
 just created, and click "Start Scan" — or trigger it via API:
@@ -225,33 +205,11 @@ PART 6 — WHAT TO POINT OUT DURING A LIVE DEMO
   scripted "always succeeds" demo.
 - The Sentinel's mutation_hint genuinely drives the next attack attempt
   (Attack DNA panel) — if you re-run a scan you may see different
-  generation counts depending on which vectors needed a retry. In
-  particular, the Prompt Injection vector's generation 0 attempt is
-  deliberately generic and genuinely fails; the Sentinel's hint is what
-  drives generation 1 to reference the ticket explicitly, which is what
-  actually succeeds — a real evolution, not a scripted retry.
-- Expand a finding in the dashboard and point out the amber "Policy
-  violation: ..." line — that's the Sentinel explaining the finding in
-  terms of the target's OWN declared security policy (execute_admin_action
-  being admin-only, internal_notes being a protected resource, etc — see
-  the permission_map in Step 1), not just generic "this looks bad"
-  reasoning. Different violation types produce different, specific
-  phrasing (see the table in the reconciliation plan / README).
+  generation counts depending on which vectors needed a retry.
 - The re-validation step makes a real HTTP call to the target's
   /admin/apply_patch endpoint and replays the real payload — the
   FIXED/STILL VULNERABLE result is computed from the Sentinel's live
   judgment of the new response, not a database flag flip.
-- After a finding is fixed, watch the Fortress Integrity / risk score
-  actually move — the backend excludes revalidation_passed findings from
-  the aggregate and recomputes it on every apply-and-revalidate call
-  (see app/services/risk.py), so patching visibly improves the score
-  instead of the scorecard staying frozen at its scan-completion value.
-- Try registering a target with the authorization checkbox unchecked (or
-  via curl with "authorized": false) and clicking Declare War / Start
-  Scan — SwarmShield refuses with a 403, and the dashboard surfaces that
-  refusal as a visible error banner rather than failing silently. This
-  is a real server-side guard (api/routes/scans.py), not just a disabled
-  button.
 - Everything runs with zero external API calls when GEMINI_API_KEY is
   unset — safe to demo on conference wifi.
 
