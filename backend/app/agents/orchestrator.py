@@ -44,7 +44,7 @@ from app.models.scan import ScanRun, ScanStatus
 from app.models.target import TargetProfile
 from app.models.vulnerability import Severity, Vulnerability
 from app.schemas.attack import AgentLogEvent
-from app.services import dna_service, event_bus, memory_service, policy_service, risk
+from app.services import dna_service, event_bus, memory_service, policy_service, risk, context_manager
 from app.services.target_client import TargetClient
 
 SPECIALIST_REGISTRY = {
@@ -73,6 +73,7 @@ async def run_scan(scan_id: uuid.UUID, db: Session) -> None:
     scan = db.query(ScanRun).filter(ScanRun.id == scan_id).one()
     target = db.query(TargetProfile).filter(TargetProfile.id == scan.target_id).one()
 
+    context_token = context_manager.activate(db, scan_id)
     try:
         # --- 1. Planning phase ---
         scan.status = ScanStatus.PLANNING
@@ -163,6 +164,16 @@ async def run_scan(scan_id: uuid.UUID, db: Session) -> None:
                 attack_gen = specialist.generate_attack(json.dumps(context))
                 payload = attack_gen.get("payload", "")
 
+                # A repeated known-failed strategy against an unchanged
+                # target spends neither target requests nor LLM budget.
+                if memory_service.strategy_seen(
+                    db, target_fingerprint=str(target.id),
+                    vulnerability_type=vector.get("owasp_category", ""),
+                    strategy=str(attack_gen.get("technique") or ""),
+                ):
+                    await _emit(scan_id, "strategy_skipped", f"Skipped previously failed strategy for '{vector_id}'", agent_type=specialist_key)
+                    break
+
                 await _emit(
                     scan_id, "agent_action",
                     f"{specialist_key} attempt #{generation + 1} on '{vector_id}' "
@@ -235,6 +246,14 @@ async def run_scan(scan_id: uuid.UUID, db: Session) -> None:
                     agent=specialist_key,
                     source_attack_id=log.id,
                 )
+                memory_service.write_experience(
+                    db, namespace=specialist_key, vulnerability_type=vector.get("owasp_category"),
+                    strategy=attack_gen.get("technique"),
+                    target_fingerprint=str(target.id), success=succeeded,
+                    confidence=float(verdict.get("confidence") or .5),
+                    importance=float(verdict.get("confidence") or .5),
+                    content=f"{specialist_key}: {vector_id}; technique={attack_gen.get('technique')}; result={'success' if succeeded else 'failure'}",
+                )
 
                 if succeeded:
                     policy_violation = verdict.get("policy_violation")
@@ -303,7 +322,10 @@ async def run_scan(scan_id: uuid.UUID, db: Session) -> None:
         )
 
     except Exception as e:  # noqa: BLE001 - hackathon: surface any failure to the stream
+        db.rollback()
         scan.status = ScanStatus.FAILED
         db.commit()
         await _emit(scan_id, "scan_status", f"Scan failed: {e}")
         raise
+    finally:
+        context_manager.clear(context_token)

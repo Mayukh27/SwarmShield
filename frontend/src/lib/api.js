@@ -28,6 +28,7 @@ export const api = {
     }),
   getScan: (id) => request(`/scans/${id}`),
   getAttackLogs: (scanId) => request(`/scans/${scanId}/attack-logs`),
+  scanReportPdfUrl: (scanId) => `${BASE}/scans/${scanId}/report.pdf`,
 
   // Vulnerabilities
   listVulnerabilities: (scanId) =>
@@ -37,6 +38,9 @@ export const api = {
   generatePatch: (vulnerabilityId) =>
     request(`/patches/generate/${vulnerabilityId}`, { method: "POST" }),
   listPatches: (vulnerabilityId) => request(`/patches/${vulnerabilityId}`),
+  patchSuggestionPdfUrl: (patchId) => `${BASE}/patches/${patchId}/suggestion.pdf`,
+  createRemediationPr: (patchId) => request(`/patches/${patchId}/create-pr`, { method: "POST" }),
+  writeRemediationBranch: (patchId) => request(`/patches/${patchId}/write-branch`, { method: "POST" }),
 
   // Memory / Attack DNA / Graph — new panels
   getScanMemory: (scanId) => request(`/scans/${scanId}/memory`),

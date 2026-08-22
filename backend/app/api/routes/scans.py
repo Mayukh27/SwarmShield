@@ -2,7 +2,7 @@ import asyncio
 import json
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
@@ -13,6 +13,7 @@ from app.models.attack import AttackLog
 from app.schemas.attack import AttackLogOut
 from app.schemas.scan import ScanCreate, ScanOut
 from app.services import event_bus
+from app.services.pdf_service import make_text_pdf
 from app.services.scan_manager import launch_scan
 
 router = APIRouter(prefix="/scans", tags=["scans"])
@@ -64,6 +65,49 @@ def list_scans(target_id: uuid.UUID | None = None, db: Session = Depends(get_db)
     if target_id:
         q = q.filter(ScanRun.target_id == target_id)
     return q.order_by(ScanRun.started_at.desc()).all()
+
+
+@router.get("/{scan_id}/report.pdf")
+def scan_report_pdf(scan_id: uuid.UUID, db: Session = Depends(get_db)):
+    scan = db.query(ScanRun).filter(ScanRun.id == scan_id).first()
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    findings = scan.vulnerabilities
+    finding_lines = []
+    for vuln in findings:
+        finding_lines.append(
+            f"{vuln.severity.value.upper()} - {vuln.status.value} - {vuln.title}\n"
+            f"Category: {vuln.owasp_category}\n"
+            f"Description: {vuln.description}\n"
+            f"Evidence: {(vuln.evidence or '')[:1200]}"
+        )
+    if not finding_lines:
+        finding_lines.append("No confirmed vulnerabilities were recorded for this scan.")
+
+    pdf = make_text_pdf(
+        "SwarmShield Final Scan Report",
+        [
+            (
+                "Scan Summary",
+                f"Scan ID: {scan.id}\n"
+                f"Target: {scan.target.name} ({scan.target.endpoint_url})\n"
+                f"Status: {scan.status.value}\n"
+                f"Risk score: {scan.risk_score if scan.risk_score is not None else 'pending'}\n"
+                f"Attempts: {scan.total_attempts}\n"
+                f"Successful attacks: {scan.successful_attacks}\n"
+                f"Started: {scan.started_at}\n"
+                f"Completed: {scan.completed_at or 'pending'}",
+            ),
+            ("Risk Breakdown", json.dumps(scan.risk_breakdown or {}, indent=2)),
+            ("Findings", "\n\n".join(finding_lines)),
+        ],
+    )
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="swarmshield-report-{scan.id}.pdf"'},
+    )
 
 
 @router.get("/{scan_id}/attack-logs", response_model=list[AttackLogOut])

@@ -234,3 +234,52 @@ def test_memory_retrieve_ranks_by_term_overlap(db, scan):
 
     results = memory_service.retrieve_relevant(db, scan_id=scan.id, query="ticket escalation", limit=5)
     assert results[0].content.startswith("ticket escalation")
+
+
+def test_strategy_seen_uses_numeric_success_flag(db):
+    target_fingerprint = f"target-{uuid.uuid4()}"
+    vulnerability_type = "LLM01: Prompt Injection"
+    failed_strategy = f"failed-{uuid.uuid4()}"
+    successful_strategy = f"successful-{uuid.uuid4()}"
+
+    try:
+        memory_service.write_experience(
+            db,
+            namespace="test",
+            content=f"failed strategy {failed_strategy}",
+            confidence=0.8,
+            importance=0.8,
+            strategy=failed_strategy,
+            vulnerability_type=vulnerability_type,
+            target_fingerprint=target_fingerprint,
+            success=False,
+        )
+        memory_service.write_experience(
+            db,
+            namespace="test",
+            content=f"successful strategy {successful_strategy}",
+            confidence=0.8,
+            importance=0.8,
+            strategy=successful_strategy,
+            vulnerability_type=vulnerability_type,
+            target_fingerprint=target_fingerprint,
+            success=True,
+        )
+
+        assert memory_service.strategy_seen(
+            db,
+            target_fingerprint=target_fingerprint,
+            vulnerability_type=vulnerability_type,
+            strategy=failed_strategy,
+        ) is True
+        assert memory_service.strategy_seen(
+            db,
+            target_fingerprint=target_fingerprint,
+            vulnerability_type=vulnerability_type,
+            strategy=successful_strategy,
+        ) is False
+    finally:
+        from app.models.agent_memory import AgentMemory
+
+        db.query(AgentMemory).filter(AgentMemory.target_fingerprint == target_fingerprint).delete()
+        db.commit()

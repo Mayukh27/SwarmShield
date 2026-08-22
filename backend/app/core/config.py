@@ -22,6 +22,37 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.0-flash"
 
+    # --- Local-first LLM routing ---
+    LLM_PROVIDER: str = "auto"  # auto, local, gemini, grok
+    LOCAL_LLM_ENABLED: bool = True
+    LOCAL_LLM_PROVIDER: str = "ollama"
+    LOCAL_LLM_MODEL: str = ""
+    LOCAL_LLM_BASE_URL: str = "http://localhost:11434"
+    GROK_ENABLED: bool = False
+    GROK_API_KEY: str = ""
+    GROK_MODEL: str = ""
+    GROK_BASE_URL: str = "https://api.x.ai/v1"
+    LLM_CLOUD_FALLBACK: bool = True
+    LLM_CONFIDENCE_THRESHOLD: float = 0.80
+    LLM_MEDIUM_CONFIDENCE_THRESHOLD: float = 0.60
+    LOCAL_LLM_MAX_CONTEXT_TOKENS: int = 4000
+    LOCAL_LLM_MAX_OUTPUT_TOKENS: int = 1000
+    MAX_LOCAL_LLM_CONCURRENCY: int = 2
+    MAX_CLOUD_LLM_CONCURRENCY: int = 1
+    MAX_LOCAL_LLM_CALLS_PER_SCAN: int = 100
+    MAX_CLOUD_LLM_CALLS_PER_SCAN: int = 5
+    MAX_CLOUD_LLM_CALLS_PER_MINUTE: int = 5
+
+    # --- Local RAG and persistent intelligence ---
+    RAG_ENABLED: bool = True
+    RAG_TOP_K: int = 6
+    RAG_MAX_CONTEXT_TOKENS: int = 3500
+    MAX_RAG_QUERIES_PER_SCAN: int = 50
+    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+    MEMORY_ENABLED: bool = True
+    MEMORY_MIN_IMPORTANCE: float = 0.60
+    LLM_CACHE_ENABLED: bool = True
+
     # --- Swarm behavior ---
     MAX_ATTACK_ATTEMPTS_PER_VECTOR: int = 5  # cap on adaptive feedback loop retries
     SCAN_TIMEOUT_SECONDS: int = 600

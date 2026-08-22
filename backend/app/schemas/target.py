@@ -4,7 +4,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-from app.models.target import TargetAccessMode
+from app.models.target import CodeVisibility, TargetAccessMode
 
 
 class TargetProfileCreate(BaseModel):
@@ -22,6 +22,8 @@ class TargetProfileCreate(BaseModel):
     access_mode: TargetAccessMode = TargetAccessMode.READ_ONLY
     allow_direct_patch_apply: bool = False
     allow_pr_creation: bool = False
+    code_visibility: CodeVisibility = CodeVisibility.UNKNOWN
+    allow_branch_write: bool = False
 
 
 class TargetProfileOut(BaseModel):
@@ -36,6 +38,8 @@ class TargetProfileOut(BaseModel):
     access_mode: TargetAccessMode
     allow_direct_patch_apply: bool
     allow_pr_creation: bool
+    code_visibility: CodeVisibility
+    allow_branch_write: bool
     created_at: datetime
 
     class Config:

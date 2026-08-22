@@ -39,7 +39,7 @@ def _get_client():
     return _client
 
 
-def generate(
+def generate_cloud(
     system_instruction: str,
     user_content: str,
     as_json: bool = False,
@@ -54,9 +54,7 @@ def generate(
     configured -- see module docstring.
     """
     if not _gemini_configured():
-        from app.services import fallback_engine
-
-        return fallback_engine.generate(system_instruction, user_content, as_json=as_json)
+        raise RuntimeError("Gemini is not configured")
 
     from google.genai import types
 
@@ -85,3 +83,9 @@ def generate(
             return json.loads(cleaned)
 
     return text
+
+
+def generate(system_instruction: str, user_content: str, as_json: bool = False, temperature: float = 0.7) -> Any:
+    """Compatibility entrypoint. Existing agents retain this exact API."""
+    from app.services.llm_router import generate as route_generate
+    return route_generate(system_instruction, user_content, as_json=as_json, temperature=temperature)
