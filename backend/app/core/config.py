@@ -29,6 +29,19 @@ class Settings(BaseSettings):
     # --- n8n (optional external orchestration trigger) ---
     N8N_WEBHOOK_URL: str = ""
 
+    # --- GitHub (optional; powers the auto-PR remediation workflow) ---
+    # Never hardcode these -- env vars / secrets manager only. A fine-
+    # grained PAT scoped to Contents:write + Pull requests:write on the
+    # single target repo is the least-privilege choice here (not a
+    # classic token with broad repo/admin scope).
+    GITHUB_TOKEN: str = ""
+    GITHUB_REPO: str = ""            # "owner/repo"
+    GITHUB_BASE_BRANCH: str = "main"
+    GITHUB_API_URL: str = "https://api.github.com"
+
+    def github_configured(self) -> bool:
+        return bool(self.GITHUB_TOKEN and self.GITHUB_REPO)
+
 
 @lru_cache
 def get_settings() -> Settings:

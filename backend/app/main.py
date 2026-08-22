@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import graph, memory_dna, patches, revalidation, scans, targets, vulnerabilities
+from app.api.routes import graph, memory_dna, patches, remediation_pr, revalidation, scans, targets, vulnerabilities
 from app.core.config import settings
 from app.db.init_db import init_db
 
@@ -31,6 +31,7 @@ app.include_router(patches.router, prefix=settings.API_V1_PREFIX)
 app.include_router(graph.router, prefix=settings.API_V1_PREFIX)
 app.include_router(memory_dna.router, prefix=settings.API_V1_PREFIX)
 app.include_router(revalidation.router, prefix=settings.API_V1_PREFIX)
+app.include_router(remediation_pr.router, prefix=settings.API_V1_PREFIX)
 
 
 @app.get("/health")

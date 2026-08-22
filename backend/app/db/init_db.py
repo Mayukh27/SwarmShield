@@ -45,6 +45,40 @@ def init_db() -> None:
             )
             print("[SwarmShield] Added target_profiles.authorization_note")
 
+        if "access_mode" not in columns:
+            conn.execute(
+                text(
+                    "DO $$ BEGIN "
+                    "CREATE TYPE targetaccessmode AS ENUM ('read_only', 'read_write'); "
+                    "EXCEPTION WHEN duplicate_object THEN NULL; END $$;"
+                )
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE target_profiles "
+                    "ADD COLUMN access_mode targetaccessmode NOT NULL DEFAULT 'read_only'"
+                )
+            )
+            print("[SwarmShield] Added target_profiles.access_mode (default read_only)")
+
+        if "allow_direct_patch_apply" not in columns:
+            conn.execute(
+                text(
+                    "ALTER TABLE target_profiles "
+                    "ADD COLUMN allow_direct_patch_apply BOOLEAN NOT NULL DEFAULT FALSE"
+                )
+            )
+            print("[SwarmShield] Added target_profiles.allow_direct_patch_apply")
+
+        if "allow_pr_creation" not in columns:
+            conn.execute(
+                text(
+                    "ALTER TABLE target_profiles "
+                    "ADD COLUMN allow_pr_creation BOOLEAN NOT NULL DEFAULT FALSE"
+                )
+            )
+            print("[SwarmShield] Added target_profiles.allow_pr_creation")
+
     print("[SwarmShield] Database tables created/updated.")
 
 

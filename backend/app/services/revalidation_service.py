@@ -30,6 +30,7 @@ from app.models.attack import AttackLog
 from app.models.patch import RemediationPatch
 from app.models.revalidation import RevalidationRecord, RevalidationResult
 from app.models.vulnerability import Vulnerability, VulnerabilityStatus
+from app.services.authorization import ensure_direct_apply_allowed
 from app.services.target_client import TargetClient
 
 
@@ -37,7 +38,16 @@ async def apply_patch_to_target(target, patch: RemediationPatch) -> dict:
     """Best-effort: only the controlled target implements this admin hook.
     Real third-party targets won't, and that's fine -- revalidation still
     works, it'll just show the finding as still open until a human applies
-    the fix out of band."""
+    the fix out of band.
+
+    SECURITY: this is the one function that can actually write to a live
+    target, so the read-only/permission gate is enforced right here (not
+    just in the route) -- ensure_direct_apply_allowed raises HTTPException
+    (403) if the target hasn't been explicitly opted into read_write access
+    AND allow_direct_patch_apply. This makes the check apply no matter what
+    calls this function in the future, not only today's single route."""
+    ensure_direct_apply_allowed(target)
+
     admin_url = urljoin(target.endpoint_url, "/admin/apply_patch")
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:

@@ -28,7 +28,16 @@ async def apply_and_revalidate(
     not just a stored flag. Pass `apply=false` to replay WITHOUT applying
     the patch first -- e.g. to show the still-vulnerable baseline before
     remediation, or to check whether a target you already patched
-    out-of-band actually fixed the issue."""
+    out-of-band actually fixed the issue.
+
+    SECURITY: `apply=true` is a live write to the target and is only
+    permitted when the target has been explicitly opted into read_write
+    access_mode AND allow_direct_patch_apply (see
+    app.services.authorization). This is enforced server-side inside
+    apply_patch_to_target itself, so a read-only target gets a 403 here
+    regardless of what the frontend sent -- the frontend has no way to
+    grant a write it isn't entitled to. `apply=false` (revalidate only,
+    no write) always works for every target, read-only or not."""
     vuln = db.query(Vulnerability).filter(Vulnerability.id == vulnerability_id).first()
     if not vuln:
         raise HTTPException(status_code=404, detail="Vulnerability not found")

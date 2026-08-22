@@ -4,6 +4,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from app.models.target import TargetAccessMode
+
 
 class TargetProfileCreate(BaseModel):
     name: str
@@ -15,6 +17,11 @@ class TargetProfileCreate(BaseModel):
     permission_map: dict[str, Any] = Field(default_factory=dict)
     authorized: bool = False
     authorization_note: Optional[str] = None
+    # Safe-by-default: a newly registered target cannot write to itself or
+    # to GitHub until someone explicitly opts it in.
+    access_mode: TargetAccessMode = TargetAccessMode.READ_ONLY
+    allow_direct_patch_apply: bool = False
+    allow_pr_creation: bool = False
 
 
 class TargetProfileOut(BaseModel):
@@ -26,6 +33,9 @@ class TargetProfileOut(BaseModel):
     permission_map: dict[str, Any]
     authorized: bool
     authorization_note: Optional[str]
+    access_mode: TargetAccessMode
+    allow_direct_patch_apply: bool
+    allow_pr_creation: bool
     created_at: datetime
 
     class Config:
