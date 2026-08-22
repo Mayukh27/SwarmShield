@@ -1,0 +1,291 @@
+SWARMSHIELD — RUN & DEMO GUIDE
+================================
+Everything in this file was actually executed against a real PostgreSQL
+instance in the build session that produced this repo (no Gemini API key —
+this ran on the deterministic offline fallback engine, see "About the
+offline mode" below). Follow it as written and you will reproduce the same
+results.
+
+
+PART 1 — PREREQUISITES
+-----------------------
+- Python 3.12
+- Node.js 18+ (built/tested with Node 22)
+- PostgreSQL 16 (or Docker, see Part 4)
+- (Optional) a Gemini API key, if you want the swarm driven by a real LLM
+  instead of the offline fallback engine
+
+
+PART 2 — ONE-TIME SETUP
+-------------------------
+
+1. Start PostgreSQL and create the database + user.
+
+   If you have Postgres installed locally:
+       sudo service postgresql start
+       sudo -u postgres psql -c "CREATE USER swarmshield WITH PASSWORD 'swarmshield' SUPERUSER;"
+       sudo -u postgres psql -c "CREATE DATABASE swarmshield OWNER swarmshield;"
+
+   (Or skip this and use Docker for the database only:
+       docker run -d --name swarmshield-db -p 5432:5432 \
+         -e POSTGRES_DB=swarmshield -e POSTGRES_USER=swarmshield \
+         -e POSTGRES_PASSWORD=swarmshield postgres:16-alpine
+   )
+
+2. Set up the backend virtual environment.
+
+       cd backend
+       python3 -m venv venv
+       source venv/bin/activate
+       pip install -r requirements.txt
+
+3. Set up the controlled target's environment (separate, lightweight deps).
+
+       cd ../controlled_target
+       pip install -r requirements.txt
+       # (if you're using the same venv as the backend, this is already covered)
+
+4. Set up the frontend.
+
+       cd ../frontend
+       npm install
+
+5. Configure environment variables.
+
+       cd ..
+       cp .env.example .env
+       # Leave GEMINI_API_KEY blank to run entirely offline (recommended for
+       # a live demo — no API costs, no network dependency, deterministic).
+       # Set it if you want real Gemini-driven agents.
+
+
+PART 3 — STARTING EVERYTHING (3 terminals)
+--------------------------------------------
+
+Terminal 1 — Controlled target (the authorized, local, intentionally
+vulnerable AI system the swarm attacks):
+
+    cd controlled_target
+    source ../backend/venv/bin/activate      # if using a shared venv
+    python app.py
+    # -> Uvicorn running on http://127.0.0.1:9100
+    # verify: curl http://127.0.0.1:9100/health
+
+Terminal 2 — Backend API (Planner/Specialists/Sentinel/Memory/DNA/Risk/
+Remediation/Revalidation, all agent orchestration):
+
+    cd backend
+    source venv/bin/activate
+    export DATABASE_URL='postgresql+psycopg2://swarmshield:swarmshield@localhost:5432/swarmshield'
+    export GEMINI_API_KEY=''        # or your real key
+    python -m app.db.init_db        # creates all 9 tables — run once, safe to re-run
+    uvicorn app.main:app --reload --port 8000
+    # -> http://127.0.0.1:8000
+    # verify: curl http://127.0.0.1:8000/health
+
+Terminal 3 — Frontend dashboard:
+
+    cd frontend
+    npm run dev
+    # -> http://localhost:5173 (Vite dev server; proxies /api/* to
+    #    localhost:8000 automatically -- see vite.config.js)
+
+  (For a production-style build instead of the dev server, you need
+  something in front of it to proxy /api/* to the backend -- that's what
+  frontend/nginx.conf + the Docker path in Part 4 does. A bare
+  `npm run build && npx serve dist` will NOT work standalone since there's
+  nothing to proxy /api/* to port 8000.)
+
+
+PART 4 — STARTING EVERYTHING WITH DOCKER (1 command)
+-------------------------------------------------------
+    cp .env.example .env    # optionally set GEMINI_API_KEY
+    docker compose up --build
+
+    frontend -> http://localhost:5173
+    api      -> http://localhost:8000
+    target   -> http://localhost:9100
+
+(Note: the Docker path wires the same four services together but was not
+re-verified end-to-end in the build session — the local/venv path in Part 3
+is the one that was actually run and confirmed working. If anything in the
+Docker path needs adjusting, the docker-compose.yml service names/ports
+match the DATABASE_URL/endpoint_url values below, so start there.)
+
+
+PART 5 — RUNNING THE LIVE DEMO
+---------------------------------
+
+Step 1: Register the controlled target with SwarmShield, including its
+security policy (declared tool restrictions / protected resources / which
+policies it expects to be enforced — this is what lets the Sentinel explain
+findings as actual policy violations, not just generic reasoning; see Part
+6 below) and an authorization attestation. SwarmShield refuses to scan any
+target where "authorized" isn't true (403) — this isn't just a UI checkbox,
+it's enforced server-side in api/routes/scans.py.
+
+    curl -X POST http://127.0.0.1:8000/api/targets \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "SwarmShield Controlled Demo Target",
+        "description": "User -> LLM -> RAG -> Mock Tools, local hackathon target",
+        "endpoint_url": "http://127.0.0.1:9100/chat",
+        "declared_tools": {"tools": [
+          {"name": "read_file", "description": "read a file from mock filesystem"},
+          {"name": "send_email", "description": "send an email"},
+          {"name": "execute_admin_action", "description": "perform an admin action"}
+        ]},
+        "permission_map": {
+          "tools": {
+            "execute_admin_action": {"restriction": "admin_only"},
+            "send_email": {"restriction": "external_recipients_restricted"},
+            "read_file": {"restriction": "restricted_paths", "restricted_paths": ["internal_notes.txt"]}
+          },
+          "protected_resources": ["internal_notes", "customer data", "confidential pricing"],
+          "policies": ["no_unauthorized_tool_execution", "no_privilege_escalation", "no_confidential_exfiltration", "detect_prompt_injection"]
+        },
+        "authorized": true,
+        "authorization_note": "I own this system -- it is the local controlled_target."
+      }'
+
+    Copy the "id" field from the response — this is TARGET_ID.
+
+    (permission_map is optional — omit it or pass {} and everything still
+    works exactly as before, just without the policy-violation phrasing on
+    findings. It's an existing column on the target, not a new API.)
+
+Step 2: Open the dashboard (http://localhost:5173), select the target you
+just created, and click "Start Scan" — or trigger it via API:
+
+    curl -X POST http://127.0.0.1:8000/api/scans \
+      -H "Content-Type: application/json" \
+      -d '{"target_id": "TARGET_ID"}'
+
+    Copy "id" from the response — this is SCAN_ID.
+
+Step 3: Watch it run. In the dashboard you'll see, live:
+  - Planner Agent analyzing the target and producing an attack plan
+    (prompt injection / jailbreak / tool abuse / data exfiltration /
+    privilege escalation vectors)
+  - Each specialist generating a real payload and sending it to the
+    controlled target
+  - Sentinel Agent's verdict on each response (violation_detected,
+    severity, confidence, reasoning, mutation_hint)
+  - Shared Memory panel filling in as each attempt's outcome is recorded
+    and consulted by later vectors
+  - Attack DNA panel showing mutation lineage when an attempt fails and
+    retries with a Sentinel-driven mutation
+  - Vulnerability table populating with confirmed findings + risk scores
+  - Risk Breakdown panel showing the severity/category-weighted aggregate
+
+  Or poll via API:
+      curl http://127.0.0.1:8000/api/scans/SCAN_ID
+
+Step 4: Inspect a finding's evidence.
+
+    curl http://127.0.0.1:8000/api/vulnerabilities?scan_id=SCAN_ID
+
+  Evidence includes the exact payload and the target's actual response
+  (e.g. containing "CONFIDENTIAL: ..." and "TOOL_CALL: execute_admin_action"
+  text) — not a scripted result.
+
+Step 5: Generate a remediation patch for a finding.
+
+    curl -X POST http://127.0.0.1:8000/api/patches/generate/VULN_ID
+
+Step 6 (the payoff): Show the vulnerability is real, then show it get fixed.
+
+    # 6a. Confirm it's still exploitable (replay without applying the patch):
+    curl -X POST "http://127.0.0.1:8000/api/vulnerabilities/VULN_ID/apply-and-revalidate?patch_id=PATCH_ID&apply=false"
+    # -> "result": "still_vulnerable"
+
+    # 6b. NOW actually apply the patch to the live target and re-test:
+    curl -X POST "http://127.0.0.1:8000/api/vulnerabilities/VULN_ID/apply-and-revalidate?patch_id=PATCH_ID&apply=true"
+    # -> "result": "fixed"
+
+  This is the strongest demo moment: the exact same payload that proved
+  the vulnerability is replayed against the target, and you can show the
+  target's response is genuinely different before vs. after — SwarmShield
+  found it, explained it, fixed it, and proved the fix works.
+
+  Or click "Apply patch & re-validate" on the finding in the dashboard —
+  it does steps 6a/6b for you (apply=true) and shows the FIXED/STILL
+  VULNERABLE badge.
+
+
+PART 6 — WHAT TO POINT OUT DURING A LIVE DEMO
+-------------------------------------------------
+- The controlled target's vulnerabilities are real and documented (search
+  "VULN:" in controlled_target/app.py): RAG poisoning / indirect prompt
+  injection via a planted "support ticket" document, unsafe tool
+  permissions (no role check on execute_admin_action or reading
+  internal_notes.txt), and direct prompt injection.
+- A benign query to the target stays completely clean — only
+  attack-shaped queries trigger the vulnerable path. This is not a
+  scripted "always succeeds" demo.
+- The Sentinel's mutation_hint genuinely drives the next attack attempt
+  (Attack DNA panel) — if you re-run a scan you may see different
+  generation counts depending on which vectors needed a retry. In
+  particular, the Prompt Injection vector's generation 0 attempt is
+  deliberately generic and genuinely fails; the Sentinel's hint is what
+  drives generation 1 to reference the ticket explicitly, which is what
+  actually succeeds — a real evolution, not a scripted retry.
+- Expand a finding in the dashboard and point out the amber "Policy
+  violation: ..." line — that's the Sentinel explaining the finding in
+  terms of the target's OWN declared security policy (execute_admin_action
+  being admin-only, internal_notes being a protected resource, etc — see
+  the permission_map in Step 1), not just generic "this looks bad"
+  reasoning. Different violation types produce different, specific
+  phrasing (see the table in the reconciliation plan / README).
+- The re-validation step makes a real HTTP call to the target's
+  /admin/apply_patch endpoint and replays the real payload — the
+  FIXED/STILL VULNERABLE result is computed from the Sentinel's live
+  judgment of the new response, not a database flag flip.
+- After a finding is fixed, watch the Fortress Integrity / risk score
+  actually move — the backend excludes revalidation_passed findings from
+  the aggregate and recomputes it on every apply-and-revalidate call
+  (see app/services/risk.py), so patching visibly improves the score
+  instead of the scorecard staying frozen at its scan-completion value.
+- Try registering a target with the authorization checkbox unchecked (or
+  via curl with "authorized": false) and clicking Declare War / Start
+  Scan — SwarmShield refuses with a 403, and the dashboard surfaces that
+  refusal as a visible error banner rather than failing silently. This
+  is a real server-side guard (api/routes/scans.py), not just a disabled
+  button.
+- Everything runs with zero external API calls when GEMINI_API_KEY is
+  unset — safe to demo on conference wifi.
+
+
+ABOUT THE OFFLINE MODE
+------------------------
+app/services/fallback_engine.py stands in for Gemini when GEMINI_API_KEY
+is not set. It's deterministic but not scripted: it inspects the actual
+target's declared tools, the actual target_response text, and the actual
+Sentinel mutation_hint to produce different outputs for different inputs
+— e.g. a benign target response and a compromised one produce genuinely
+different Sentinel verdicts. This is what the build/test session ran on,
+since that environment had no network path to the real Gemini API. Set
+GEMINI_API_KEY to switch every agent to real Gemini calls with no other
+code changes.
+
+
+TROUBLESHOOTING
+------------------
+- "connection to server ... failed" — Postgres isn't running; see Part 2
+  step 1.
+- Scan status stuck at "planning" or "attacking" — check Terminal 2's
+  logs; the orchestrator raises and marks the scan "failed" on any
+  exception, check for a target connectivity issue (is the controlled
+  target running on port 9100?).
+- Empty vulnerabilities list after a completed scan — this means the
+  Sentinel genuinely did not detect a violation; try a fresh scan, or
+  check controlled_target's audit log (swarmshield_target_audit.log) to
+  confirm the poisoned document (kb-004) was actually retrieved.
+- Frontend shows no data — the frontend calls relative /api/* paths,
+  proxied to http://localhost:8000 by Vite's dev server (see
+  frontend/vite.config.js). Confirm the backend is actually running on
+  port 8000; if you're serving the production build (npm run build) with
+  a static file server instead of `npm run dev`, that proxy doesn't
+  exist, so put a reverse proxy (or nginx, as in the Docker setup) in
+  front of it, or run against the built dist/ served on the same origin
+  as the api.

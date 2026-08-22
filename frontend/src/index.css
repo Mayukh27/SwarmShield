@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-void text-text-primary font-body antialiased;
+    background-image:
+      linear-gradient(rgba(30, 39, 49, 0.35) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(30, 39, 49, 0.35) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  ::selection {
+    background: rgba(232, 163, 61, 0.3);
+  }
+  /* Visible keyboard focus everywhere, per accessibility floor */
+  :focus-visible {
+    outline: 2px solid #e8a33d;
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}

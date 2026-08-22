@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: swarmshield
+      POSTGRES_USER: swarmshield
+      POSTGRES_PASSWORD: swarmshield
+    ports: ["5432:5432"]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U swarmshield -d swarmshield"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Authorized, local-only vulnerable target: User -> LLM -> RAG -> Mock Tools.
+  # This is what the swarm attacks. See controlled_target/app.py for the
+  # documented, intentional vulnerabilities. SAFE_MODE=True always; it makes
+  # no outbound network calls of its own.
+  controlled-target:
+    build: ./controlled_target
+    environment:
+      TARGET_HOST: "0.0.0.0"
+      TARGET_PORT: "9100"
+      # Optional: set to use real Gemini for the target's own responses too.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    ports: ["9100:9100"]
+
+  api:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://swarmshield:swarmshield@db:5432/swarmshield
+      # Leave GEMINI_API_KEY unset to run the swarm on the deterministic
+      # offline fallback engine (app/services/fallback_engine.py); set it
+      # to drive the planner/specialists/sentinel/remediation with real Gemini.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    ports: ["8000:8000"]
+    depends_on:
+      db:
+        condition: service_healthy
+      controlled-target:
+        condition: service_started
+
+  frontend:
+    build: ./frontend
+    ports: ["5173:80"]
+    depends_on: [api]
+
+volumes:
+  postgres_data:
