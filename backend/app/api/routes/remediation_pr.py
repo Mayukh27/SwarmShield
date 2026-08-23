@@ -9,7 +9,7 @@ from app.models.remediation_pr import RemediationPR, RemediationPRStatus
 from app.models.vulnerability import Vulnerability
 from app.schemas.remediation_pr import RemediationPROut
 from app.services import github_service
-from app.services.authorization import ensure_pr_allowed
+from app.services.authorization import ensure_branch_write_allowed, ensure_pr_allowed
 
 router = APIRouter(prefix="/patches", tags=["remediation-pr"])
 
@@ -71,6 +71,50 @@ async def create_pr(patch_id: uuid.UUID, db: Session = Depends(get_db)):
         # complete. The attempt is recorded either way for audit purposes.
         raise HTTPException(status_code=502, detail=record.error)
 
+    return record
+
+
+@router.post("/{patch_id}/write-branch", response_model=RemediationPROut, status_code=201)
+async def write_branch(patch_id: uuid.UUID, db: Session = Depends(get_db)):
+    patch = db.query(RemediationPatch).filter(RemediationPatch.id == patch_id).first()
+    if not patch:
+        raise HTTPException(status_code=404, detail="Patch not found")
+
+    vuln = db.query(Vulnerability).filter(Vulnerability.id == patch.vulnerability_id).first()
+    if not vuln:
+        raise HTTPException(status_code=404, detail="Vulnerability not found")
+
+    ensure_branch_write_allowed(vuln.scan.target)
+
+    result = await github_service.write_remediation_branch(
+        vulnerability_id=vuln.id,
+        patch_id=patch.id,
+        patch_summary=patch.summary,
+        patch_explanation=patch.explanation,
+        patch_type=patch.patch_type,
+        patch_content=patch.patch_content,
+    )
+    if not result["configured"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    record = RemediationPR(
+        id=uuid.uuid4(),
+        patch_id=patch.id,
+        vulnerability_id=vuln.id,
+        repo=result["repo"],
+        base_branch=result["base_branch"],
+        branch_name=result["branch_name"],
+        pr_number=None,
+        pr_url=None,
+        status=RemediationPRStatus.CREATED if result["status"] == "created" else RemediationPRStatus.FAILED,
+        error=result["error"],
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+
+    if record.status == RemediationPRStatus.FAILED:
+        raise HTTPException(status_code=502, detail=record.error)
     return record
 
 
