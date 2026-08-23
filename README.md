@@ -788,7 +788,3 @@ SwarmShield is a security testing and research platform intended for **systems y
 Do not register or attack third-party systems without permission. The included controlled target exists specifically to provide a safe environment for demonstrations and development.
 
 ---
-
-## License
-
-Add the project's applicable license here before public distribution.
