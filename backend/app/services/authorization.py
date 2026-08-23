@@ -67,19 +67,3 @@ def ensure_pr_allowed(target: TargetProfile) -> None:
                 "separate from direct patch application."
             ),
         )
-
-
-def ensure_branch_write_allowed(target: TargetProfile) -> None:
-    """Raises 403 unless SwarmShield may write a remediation branch for a
-    private target. This is separate from direct live patch application:
-    branch writes are code-repo writes, not target runtime writes."""
-    if target.access_mode != TargetAccessMode.READ_WRITE:
-        raise HTTPException(
-            status_code=403,
-            detail="Branch remediation requires read_write access_mode on the target.",
-        )
-    if not target.allow_branch_write:
-        raise HTTPException(
-            status_code=403,
-            detail="This target has not granted allow_branch_write permission.",
-        )

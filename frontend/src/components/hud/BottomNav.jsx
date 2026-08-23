@@ -1,11 +1,9 @@
 const NAV_ITEMS = [
   { id: "warroom", icon: "🏰", label: "War Room", sub: "Overview" },
   { id: "registry", icon: "🗺️", label: "Realm Registry", sub: "Targets" },
-  { id: "intel", icon: "🧠", label: "Intelligence", sub: "Capabilities" },
   { id: "siege", icon: "⚔️", label: "Live Siege", sub: "Active scan" },
   { id: "report", icon: "📜", label: "Siege Report", sub: "Findings" },
   { id: "forge", icon: "🔨", label: "Remediation Forge", sub: "Fix & verify" },
-  { id: "timeline", icon: "📜", label: "War Log", sub: "Timeline" },
   { id: "outcome", icon: "🏆", label: "Outcome", sub: "Results" },
   { id: "settings", icon: "⚙️", label: "Settings", sub: "" },
 ];

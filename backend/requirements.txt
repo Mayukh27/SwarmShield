@@ -8,9 +8,6 @@ google-genai==0.3.0
 httpx==0.27.2
 python-dotenv==1.0.1
 sse-starlette==2.1.3
-# Optional at runtime: embeddings fall back to local hashing when this model
-# package/model is not installed locally; no model is downloaded at startup.
-#sentence-transformers>=3.0,<4.0
 
 # dev/test only (not needed to run the app) -- versions actually installed and used to run tests/ in this build
 pytest==9.1.1

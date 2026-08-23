@@ -31,12 +31,6 @@ class TargetAccessMode(str, enum.Enum):
     READ_WRITE = "read_write"
 
 
-class CodeVisibility(str, enum.Enum):
-    PUBLIC = "public"
-    PRIVATE = "private"
-    UNKNOWN = "unknown"
-
-
 class TargetProfile(Base):
     __tablename__ = "target_profiles"
 
@@ -84,8 +78,6 @@ class TargetProfile(Base):
     # distinct permission from allow_direct_patch_apply and does not require
     # READ_WRITE access_mode.
     allow_pr_creation = Column(Boolean, nullable=False, default=False)
-    code_visibility = Column(Enum(CodeVisibility), nullable=False, default=CodeVisibility.UNKNOWN)
-    allow_branch_write = Column(Boolean, nullable=False, default=False)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

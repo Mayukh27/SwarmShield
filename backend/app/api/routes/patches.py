@@ -1,7 +1,7 @@
 import json
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.agents.remediation import RemediationAgent
@@ -10,7 +10,6 @@ from app.models.attack import AttackLog
 from app.models.patch import RemediationPatch
 from app.models.vulnerability import Vulnerability
 from app.schemas.patch import RemediationPatchOut
-from app.services.pdf_service import make_text_pdf
 
 router = APIRouter(prefix="/patches", tags=["patches"])
 
@@ -54,30 +53,4 @@ def list_patches(vulnerability_id: uuid.UUID, db: Session = Depends(get_db)):
         .filter(RemediationPatch.vulnerability_id == vulnerability_id)
         .order_by(RemediationPatch.created_at.desc())
         .all()
-    )
-
-
-@router.get("/{patch_id}/suggestion.pdf")
-def patch_suggestion_pdf(patch_id: uuid.UUID, db: Session = Depends(get_db)):
-    patch = db.query(RemediationPatch).filter(RemediationPatch.id == patch_id).first()
-    if not patch:
-        raise HTTPException(status_code=404, detail="Patch not found")
-    vuln = db.query(Vulnerability).filter(Vulnerability.id == patch.vulnerability_id).first()
-    if not vuln:
-        raise HTTPException(status_code=404, detail="Vulnerability not found")
-
-    pdf = make_text_pdf(
-        "SwarmShield Remediation Suggestion",
-        [
-            ("Finding", f"{vuln.title}\nSeverity: {vuln.severity.value}\nStatus: {vuln.status.value}"),
-            ("Evidence", vuln.evidence or ""),
-            ("Patch Summary", patch.summary),
-            ("Explanation", patch.explanation),
-            ("Suggested Change", patch.patch_content),
-        ],
-    )
-    return Response(
-        content=pdf,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="swarmshield-patch-{patch.id}.pdf"'},
     )

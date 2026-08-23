@@ -14,10 +14,6 @@ const STATUS_BADGE = {
 
 export default function RemediationForge() {
   const vulnerabilities = useScanStore((s) => s.vulnerabilities);
-  const activeScan = useScanStore((s) => s.activeScan);
-  const targets = useScanStore((s) => s.targets);
-  const selectedTargetId = useScanStore((s) => s.selectedTargetId);
-  const target = targets.find((t) => t.id === selectedTargetId);
   const [patchesByVuln, setPatchesByVuln] = useState({});
   const [loadingId, setLoadingId] = useState(null);
   const [expanded, setExpanded] = useState(null);
@@ -48,23 +44,12 @@ export default function RemediationForge() {
   return (
     <div className="mx-auto flex h-full max-w-3xl flex-col gap-4 overflow-y-auto px-5 py-6">
       <div>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h1 className="font-display text-lg font-bold text-text-primary">🔨 Remediation Forge</h1>
-            <p className="font-mono text-[11px] text-text-muted">
-              Generate a real AI-drafted fix per finding, then route it by code access:
-              public PR, private PR/branch, or read-only PDF suggestion.
-            </p>
-          </div>
-          {activeScan?.id && (
-            <a
-              href={api.scanReportPdfUrl(activeScan.id)}
-              className="shrink-0 rounded border border-cyan/40 bg-cyan/10 px-3 py-1.5 font-mono text-xs font-medium text-cyan hover:bg-cyan/20"
-            >
-              Download final report PDF
-            </a>
-          )}
-        </div>
+        <h1 className="font-display text-lg font-bold text-text-primary">🔨 Remediation Forge</h1>
+        <p className="font-mono text-[11px] text-text-muted">
+          Generate a real AI-drafted patch per finding, then apply it to the live target and
+          re-test with the exact payload that proved the breach — a real HTTP round trip, not a
+          simulation.
+        </p>
       </div>
 
       <div className="flex flex-col gap-3">
@@ -123,7 +108,7 @@ export default function RemediationForge() {
                   </button>
 
                   {(patchesByVuln[v.id] || []).map((patch) => (
-                    <PatchSuggestionPanel key={patch.id} patch={patch} vulnerabilityId={v.id} target={target} />
+                    <PatchSuggestionPanel key={patch.id} patch={patch} vulnerabilityId={v.id} />
                   ))}
                 </div>
               )}

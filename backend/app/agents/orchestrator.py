@@ -44,7 +44,7 @@ from app.models.scan import ScanRun, ScanStatus
 from app.models.target import TargetProfile
 from app.models.vulnerability import Severity, Vulnerability
 from app.schemas.attack import AgentLogEvent
-from app.services import capability_service, capability_persistence, dna_service, event_bus, memory_service, policy_service, risk, context_manager
+from app.services import dna_service, event_bus, memory_service, policy_service, risk
 from app.services.target_client import TargetClient
 
 SPECIALIST_REGISTRY = {
@@ -73,7 +73,6 @@ async def run_scan(scan_id: uuid.UUID, db: Session) -> None:
     scan = db.query(ScanRun).filter(ScanRun.id == scan_id).one()
     target = db.query(TargetProfile).filter(TargetProfile.id == scan.target_id).one()
 
-    context_token = context_manager.activate(db, scan_id)
     try:
         # --- 1. Planning phase ---
         scan.status = ScanStatus.PLANNING
@@ -81,31 +80,10 @@ async def run_scan(scan_id: uuid.UUID, db: Session) -> None:
         await _emit(scan_id, "scan_status", "Planner Agent analyzing attack surface...", agent_type="planner")
 
         planner = PlannerAgent()
-        await _emit(scan_id, "capability_scan_started", "Capability Intelligence: extracting declared tool surface...", agent_type="capability_intelligence")
-        capability_analysis = capability_service.analyze_target_capabilities(target)
-        undeclared = capability_analysis.get("undeclared_observed_count", 0)
-        if undeclared:
-            await _emit(
-                scan_id, "capability_unknown_discovered",
-                f"Capability Intelligence: {undeclared} undeclared capability(ies) observed from prior runtime data.",
-                agent_type="capability_intelligence", data={"undeclared_observed_count": undeclared},
-            )
-        await _emit(
-            scan_id, "capability_scan_completed",
-            f"Capability Intelligence: {len(capability_analysis.get('capabilities', []))} capabilities, "
-            f"{len(capability_analysis.get('attack_paths', []))} candidate attack paths, "
-            f"{len(capability_analysis.get('hypotheses', []))} hypotheses generated.",
-            agent_type="capability_intelligence",
-            data={
-                "fingerprint": capability_analysis.get("fingerprint", {}).get("fingerprint"),
-                "coverage_summary": capability_analysis.get("coverage", {}).get("summary"),
-            },
-        )
         target_desc = json.dumps({
             "name": target.name,
             "declared_tools": target.declared_tools,
             "permission_map": target.permission_map,
-            "capability_hypotheses": capability_service.summarize_hypotheses_for_planner(capability_analysis),
         })
         plan = planner.plan(target_desc)
         scan.attack_plan = plan
@@ -185,16 +163,6 @@ async def run_scan(scan_id: uuid.UUID, db: Session) -> None:
                 attack_gen = specialist.generate_attack(json.dumps(context))
                 payload = attack_gen.get("payload", "")
 
-                # A repeated known-failed strategy against an unchanged
-                # target spends neither target requests nor LLM budget.
-                if memory_service.strategy_seen(
-                    db, target_fingerprint=str(target.id),
-                    vulnerability_type=vector.get("owasp_category", ""),
-                    strategy=str(attack_gen.get("technique") or ""),
-                ):
-                    await _emit(scan_id, "strategy_skipped", f"Skipped previously failed strategy for '{vector_id}'", agent_type=specialist_key)
-                    break
-
                 await _emit(
                     scan_id, "agent_action",
                     f"{specialist_key} attempt #{generation + 1} on '{vector_id}' "
@@ -267,14 +235,6 @@ async def run_scan(scan_id: uuid.UUID, db: Session) -> None:
                     agent=specialist_key,
                     source_attack_id=log.id,
                 )
-                memory_service.write_experience(
-                    db, namespace=specialist_key, vulnerability_type=vector.get("owasp_category"),
-                    strategy=attack_gen.get("technique"),
-                    target_fingerprint=str(target.id), success=succeeded,
-                    confidence=float(verdict.get("confidence") or .5),
-                    importance=float(verdict.get("confidence") or .5),
-                    content=f"{specialist_key}: {vector_id}; technique={attack_gen.get('technique')}; result={'success' if succeeded else 'failure'}",
-                )
 
                 if succeeded:
                     policy_violation = verdict.get("policy_violation")
@@ -342,25 +302,8 @@ async def run_scan(scan_id: uuid.UUID, db: Session) -> None:
             f"Breakdown: {breakdown}",
         )
 
-        # --- 4. Re-run capability analysis with this scan's real AttackLogs,
-        # so declared-vs-observed and coverage reflect what actually
-        # happened (not just what was planned before any attempt ran) ---
-        final_logs = db.query(AttackLog).filter(AttackLog.scan_id == scan_id).all()
-        final_analysis = capability_service.analyze_target_capabilities(target, attack_logs=final_logs)
-        capability_persistence.persist_analysis(db, scan_id=scan_id, target_id=target.id, analysis=final_analysis)
-        cov = final_analysis.get("coverage", {}).get("summary", {})
-        await _emit(
-            scan_id, "capability_coverage_updated",
-            f"Capability coverage after scan: {cov.get('operation_coverage_pct', 0)}% operations, "
-            f"{cov.get('path_coverage_pct', 0)}% attack paths tested.",
-            agent_type="capability_intelligence", data=cov,
-        )
-
     except Exception as e:  # noqa: BLE001 - hackathon: surface any failure to the stream
-        db.rollback()
         scan.status = ScanStatus.FAILED
         db.commit()
         await _emit(scan_id, "scan_status", f"Scan failed: {e}")
         raise
-    finally:
-        context_manager.clear(context_token)

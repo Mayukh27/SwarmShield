@@ -28,7 +28,6 @@ export const api = {
     }),
   getScan: (id) => request(`/scans/${id}`),
   getAttackLogs: (scanId) => request(`/scans/${scanId}/attack-logs`),
-  scanReportPdfUrl: (scanId) => `${BASE}/scans/${scanId}/report.pdf`,
 
   // Vulnerabilities
   listVulnerabilities: (scanId) =>
@@ -38,9 +37,6 @@ export const api = {
   generatePatch: (vulnerabilityId) =>
     request(`/patches/generate/${vulnerabilityId}`, { method: "POST" }),
   listPatches: (vulnerabilityId) => request(`/patches/${vulnerabilityId}`),
-  patchSuggestionPdfUrl: (patchId) => `${BASE}/patches/${patchId}/suggestion.pdf`,
-  createRemediationPr: (patchId) => request(`/patches/${patchId}/create-pr`, { method: "POST" }),
-  writeRemediationBranch: (patchId) => request(`/patches/${patchId}/write-branch`, { method: "POST" }),
 
   // Memory / Attack DNA / Graph — new panels
   getScanMemory: (scanId) => request(`/scans/${scanId}/memory`),
@@ -57,27 +53,6 @@ export const api = {
     ),
   getRevalidationHistory: (vulnerabilityId) =>
     request(`/vulnerabilities/${vulnerabilityId}/revalidation-history`),
-
-  // Capability Intelligence — declared/observed/inferred capabilities,
-  // ToolFrames, capability graph, attack paths, hypotheses (all in one
-  // payload; see backend/app/services/capability_service.py).
-  getTargetCapabilities: (targetId, scanId) =>
-    request(`/targets/${targetId}/capabilities${scanId ? `?scan_id=${scanId}` : ""}`),
-  getCapabilityDiff: (targetId, scanId, compareToScanId) =>
-    request(
-      `/targets/${targetId}/capabilities/diff?scan_id=${scanId}` +
-        (compareToScanId ? `&compare_to_scan_id=${compareToScanId}` : "")
-    ),
-  getHypothesisRecords: (targetId, scanId) =>
-    request(`/targets/${targetId}/capabilities/hypotheses/records?scan_id=${scanId}`),
-  approveHypothesis: (targetId, hypothesisId, scanId) =>
-    request(`/targets/${targetId}/capabilities/hypotheses/${hypothesisId}/approve?scan_id=${scanId}`, { method: "POST" }),
-  skipHypothesis: (targetId, hypothesisId, scanId) =>
-    request(`/targets/${targetId}/capabilities/hypotheses/${hypothesisId}/skip?scan_id=${scanId}`, { method: "POST" }),
-
-  // Local-first LLM routing / RAG / memory stats (backend/app/api/routes/intelligence.py)
-  getLlmHealth: () => request(`/llm/health`),
-  getMemoryStats: () => request(`/memory/stats`),
 };
 
 export function scanStreamUrl(scanId) {

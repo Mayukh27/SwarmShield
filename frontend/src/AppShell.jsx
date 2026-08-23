@@ -6,11 +6,9 @@ import TopHUD from "./components/hud/TopHUD";
 import BottomNav from "./components/hud/BottomNav";
 import WarRoom from "./screens/WarRoom";
 import RealmRegistry from "./screens/RealmRegistry";
-import Intelligence from "./screens/Intelligence";
 import LiveSiege from "./screens/LiveSiege";
 import SiegeReport from "./screens/SiegeReport";
 import RemediationForge from "./screens/RemediationForge";
-import Timeline from "./screens/Timeline";
 import Outcome from "./screens/Outcome";
 import Settings from "./screens/Settings";
 
@@ -83,11 +81,9 @@ export default function AppShell() {
         {screen === "registry" && (
           <RealmRegistry onDeclareWar={handleDeclareWar} scanInFlight={scanInFlight} />
         )}
-        {screen === "intel" && <Intelligence />}
         {screen === "siege" && <LiveSiege onNavigate={setScreen} />}
         {screen === "report" && <SiegeReport onNavigate={setScreen} />}
         {screen === "forge" && <RemediationForge />}
-        {screen === "timeline" && <Timeline />}
         {screen === "outcome" && <Outcome onNavigate={setScreen} />}
         {screen === "settings" && <Settings />}
       </main>

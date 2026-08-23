@@ -16,34 +16,11 @@ const RESULT_STYLE = {
   inconclusive: "text-amber bg-amber-dim border-amber/30",
 };
 
-export default function PatchSuggestionPanel({ patch, vulnerabilityId, target }) {
+export default function PatchSuggestionPanel({ patch, vulnerabilityId }) {
   const [history, setHistory] = useState([]);
   const [busy, setBusy] = useState(false);
-  const [actionResult, setActionResult] = useState(null);
   const activeScanId = useScanStore((s) => s.activeScan?.id);
   const copy = () => navigator.clipboard.writeText(patch.patch_content);
-  const isPublic = target?.code_visibility === "public";
-  const isPrivateWritable = target?.code_visibility === "private" && target?.access_mode === "read_write";
-  const canCreatePr = Boolean(target?.allow_pr_creation);
-  const canWriteBranch = isPrivateWritable && Boolean(target?.allow_branch_write);
-  const canLiveApply = target?.access_mode === "read_write" && Boolean(target?.allow_direct_patch_apply);
-  const readOnlySuggestion = !canCreatePr && !canWriteBranch;
-
-  const runPatchAction = async (action) => {
-    setBusy(true);
-    setActionResult(null);
-    try {
-      const result =
-        action === "branch"
-          ? await api.writeRemediationBranch(patch.id)
-          : await api.createRemediationPr(patch.id);
-      setActionResult(result.pr_url ? `PR opened: ${result.pr_url}` : `Branch ready: ${result.branch_name}`);
-    } catch (e) {
-      setActionResult(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const applyAndRevalidate = async () => {
     setBusy(true);
@@ -89,49 +66,13 @@ export default function PatchSuggestionPanel({ patch, vulnerabilityId, target })
         {patch.patch_content}
       </pre>
 
-      <div className="mt-2.5 flex flex-wrap gap-2">
-        {canCreatePr && (
-          <button
-            onClick={() => runPatchAction("pr")}
-            disabled={busy}
-            className="rounded border border-gold/40 bg-gold-dim px-3 py-1.5 font-mono text-xs font-medium text-gold transition-colors hover:bg-gold/20 disabled:opacity-50"
-          >
-            {isPublic ? "Fix codebase & raise PR" : "Raise PR"}
-          </button>
-        )}
-        {canWriteBranch && (
-          <button
-            onClick={() => runPatchAction("branch")}
-            disabled={busy}
-            className="rounded border border-amber/40 bg-amber-dim px-3 py-1.5 font-mono text-xs font-medium text-amber transition-colors hover:bg-amber/20 disabled:opacity-50"
-          >
-            Write new branch
-          </button>
-        )}
-        {readOnlySuggestion && (
-          <a
-            href={api.patchSuggestionPdfUrl(patch.id)}
-            className="rounded border border-cyan/40 bg-cyan/10 px-3 py-1.5 font-mono text-xs font-medium text-cyan transition-colors hover:bg-cyan/20"
-          >
-            Download fix suggestion PDF
-          </a>
-        )}
-        {canLiveApply && (
-          <button
-            onClick={applyAndRevalidate}
-            disabled={busy}
-            className="rounded border border-cyan/40 bg-cyan/10 px-3 py-1.5 font-mono text-xs font-medium text-cyan transition-colors hover:bg-cyan/20 disabled:opacity-50"
-          >
-            {busy ? "Applying + re-testing target…" : "Apply live patch & re-validate"}
-          </button>
-        )}
-      </div>
-
-      {actionResult && (
-        <div className="mt-2 rounded border border-grid bg-panel px-2 py-1 font-mono text-[11px] text-text-muted">
-          {actionResult}
-        </div>
-      )}
+      <button
+        onClick={applyAndRevalidate}
+        disabled={busy}
+        className="mt-2.5 rounded border border-cyan/40 bg-cyan/10 px-3 py-1.5 font-mono text-xs font-medium text-cyan transition-colors hover:bg-cyan/20 disabled:opacity-50"
+      >
+        {busy ? "Applying + re-testing target…" : "Apply patch & re-validate"}
+      </button>
 
       {history.length > 0 && (
         <div className="mt-2 space-y-1">

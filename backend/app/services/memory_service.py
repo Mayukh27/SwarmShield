@@ -7,17 +7,11 @@ across specialists/generations/vectors within a campaign, and later
 specialists actually consult it before generating a payload (see
 orchestrator.py's `_build_specialist_context`).
 """
-import hashlib
-import re
 import uuid
-from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.models.memory import MemoryRecord, MemoryType
-from app.models.agent_memory import AgentMemory
-from app.core.config import settings
-from app.services.embedding_service import cosine_similarity, embed
 
 _VALID_TYPES = {t.value for t in MemoryType}
 
@@ -67,42 +61,3 @@ def retrieve_relevant(db: Session, *, scan_id: uuid.UUID, query: str, limit: int
 
     ranked = sorted(items, key=score, reverse=True)
     return ranked[:max(0, limit)]
-
-
-def _memory_hash(namespace: str, content: str, strategy: str | None) -> str:
-    normalized = re.sub(r"\s+", " ", content.lower()).strip()
-    return hashlib.sha256(f"{namespace}|{strategy or ''}|{normalized}".encode()).hexdigest()
-
-
-def write_experience(db: Session, *, namespace: str, content: str, confidence: float,
-                     importance: float, memory_type: str = "episodic", strategy: str | None = None,
-                     vulnerability_type: str | None = None, target_fingerprint: str | None = None,
-                     success: bool | None = None, metadata: dict[str, Any] | None = None) -> AgentMemory | None:
-    """Persist only novel, high-value summaries; raw prompts are not accepted."""
-    if (not settings.MEMORY_ENABLED or importance < settings.MEMORY_MIN_IMPORTANCE or not content.strip()
-            or re.search(r"(?i)(api[_ -]?key|password|authorization|session[_ -]?cookie)\s*[:=]", content)):
-        return None
-    digest = _memory_hash(namespace, content, strategy)
-    existing = db.query(AgentMemory).filter(AgentMemory.memory_hash == digest).first()
-    if existing: return existing
-    record = AgentMemory(namespace=namespace[:64], memory_type=memory_type, content=content.strip()[:4000],
-        confidence=max(0, min(1, confidence)), importance=max(0, min(1, importance)), strategy=strategy,
-        vulnerability_type=vulnerability_type, target_fingerprint=target_fingerprint,
-        success=float(success) if success is not None else None, metadata_json=metadata or {}, memory_hash=digest,
-        embedding=embed(content))
-    db.add(record); db.commit(); db.refresh(record)
-    return record
-
-
-def retrieve_experiences(db: Session, *, namespace: str, query: str, limit: int = 5,
-                         vulnerability_type: str | None = None) -> list[AgentMemory]:
-    rows = db.query(AgentMemory).filter(AgentMemory.namespace == namespace)
-    if vulnerability_type: rows = rows.filter(AgentMemory.vulnerability_type == vulnerability_type)
-    vector = embed(query)
-    return sorted(rows.all(), key=lambda row: (cosine_similarity(vector, row.embedding), row.confidence), reverse=True)[:limit]
-
-
-def strategy_seen(db: Session, *, target_fingerprint: str, vulnerability_type: str, strategy: str) -> bool:
-    return db.query(AgentMemory).filter(AgentMemory.target_fingerprint == target_fingerprint,
-        AgentMemory.vulnerability_type == vulnerability_type, AgentMemory.strategy == strategy,
-        AgentMemory.success == 0.0).first() is not None
