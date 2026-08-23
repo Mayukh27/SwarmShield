@@ -223,3 +223,32 @@ def test_memory_signals_empty_when_no_matching_rows():
     signals = _memory_signals_for_target(db, _FakeTarget(), [frame], [])
     # jailbreak isn't in FILESYSTEM's mapped specialists (data_exfiltration/tool_abuse), so no signal
     assert "cap-1" not in signals
+
+
+# ---------- coordinated multi-specialist vector resolution (spec section 19) ----------
+
+def test_resolve_specialists_prefers_plural_list():
+    from app.agents.orchestrator import _resolve_specialists
+
+    vector = {"specialist": "tool_abuse_specialist", "specialists": ["tool_abuse_specialist", "data_exfiltration_specialist"]}
+    assert _resolve_specialists(vector) == ["tool_abuse_specialist", "data_exfiltration_specialist"]
+
+
+def test_resolve_specialists_falls_back_to_singular():
+    from app.agents.orchestrator import _resolve_specialists
+
+    assert _resolve_specialists({"specialist": "jailbreak_specialist"}) == ["jailbreak_specialist"]
+
+
+def test_resolve_specialists_drops_unknown_keys_without_crashing():
+    from app.agents.orchestrator import _resolve_specialists
+
+    vector = {"specialists": ["tool_abuse_specialist", "made_up_specialist"]}
+    assert _resolve_specialists(vector) == ["tool_abuse_specialist"]
+
+
+def test_resolve_specialists_empty_when_nothing_valid():
+    from app.agents.orchestrator import _resolve_specialists
+
+    assert _resolve_specialists({"specialists": ["nonexistent"]}) == []
+    assert _resolve_specialists({}) == []
