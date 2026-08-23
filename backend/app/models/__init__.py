@@ -14,3 +14,4 @@ from app.models.remediation_pr import RemediationPR, RemediationPRStatus  # noqa
 from app.models.knowledge_document import KnowledgeDocument  # noqa: F401
 from app.models.agent_memory import AgentMemory  # noqa: F401
 from app.models.llm_cache import LLMCacheEntry  # noqa: F401
+from app.models.capability import CapabilityRecord, AttackHypothesisRecord, HypothesisStatus  # noqa: F401
