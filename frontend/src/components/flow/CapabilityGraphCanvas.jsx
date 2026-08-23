@@ -70,11 +70,7 @@ export default function CapabilityGraphCanvas({ graph }) {
 
   if (!graph || nodes.length === 0) {
     return (
-<<<<<<< Updated upstream
-      <div className="flex h-72 flex-col items-center justify-center gap-1 rounded-lg border border-grid bg-panel text-text-muted">
-=======
       <div className="flex h-72 flex-col items-center justify-center gap-1 rounded-2xl border border-grid/80 bg-panel/70 text-text-muted backdrop-blur-xl">
->>>>>>> Stashed changes
         <span className="font-mono text-xs">NOT YET AVAILABLE</span>
         <span className="text-[11px]">No capability graph for this target yet.</span>
       </div>
@@ -82,11 +78,7 @@ export default function CapabilityGraphCanvas({ graph }) {
   }
 
   return (
-<<<<<<< Updated upstream
-    <div className="h-96 overflow-hidden rounded-lg border border-grid bg-panel">
-=======
     <div className="h-96 overflow-hidden rounded-2xl border border-grid/80 bg-panel/70 backdrop-blur-xl">
->>>>>>> Stashed changes
       <ReactFlow
         nodes={nodes}
         edges={edges}

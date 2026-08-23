@@ -10,17 +10,9 @@ import Dashboard from "./screens/Dashboard";
 import Agents from "./screens/Agents";
 import RealmRegistry from "./screens/RealmRegistry";
 import Intelligence from "./screens/Intelligence";
-<<<<<<< Updated upstream
-import LiveSiege from "./screens/LiveSiege";
-import SiegeReport from "./screens/SiegeReport";
-import RemediationForge from "./screens/RemediationForge";
-import Timeline from "./screens/Timeline";
-import Outcome from "./screens/Outcome";
-=======
 import SiegeReport from "./screens/SiegeReport";
 import RemediationForge from "./screens/RemediationForge";
 import Reports from "./screens/Reports";
->>>>>>> Stashed changes
 import Settings from "./screens/Settings";
 import WarRoom from "./screens/WarRoom";
 import LiveSiege from "./screens/LiveSiege";
@@ -131,20 +123,6 @@ export default function AppShell() {
             </button>
           </div>
         )}
-<<<<<<< Updated upstream
-        {screen === "registry" && (
-          <RealmRegistry onDeclareWar={handleDeclareWar} scanInFlight={scanInFlight} />
-        )}
-        {screen === "intel" && <Intelligence />}
-        {screen === "siege" && <LiveSiege onNavigate={setScreen} />}
-        {screen === "report" && <SiegeReport onNavigate={setScreen} />}
-        {screen === "forge" && <RemediationForge />}
-        {screen === "timeline" && <Timeline />}
-        {screen === "outcome" && <Outcome onNavigate={setScreen} />}
-        {screen === "settings" && <Settings />}
-      </main>
-      <BottomNav screen={screen} onNavigate={setScreen} hasActiveScan={!!activeScan} />
-=======
         <main className="min-h-0 flex-1 overflow-y-auto">
           {screen === "dashboard" && (
             <Dashboard onNavigate={goToScreen} onDeclareWar={handleDeclareWar} scanInFlight={scanInFlight} />
@@ -167,7 +145,6 @@ export default function AppShell() {
         </main>
         <BottomNav screen={screen} onNavigate={goToScreen} />
       </div>
->>>>>>> Stashed changes
     </div>
   );
 }
