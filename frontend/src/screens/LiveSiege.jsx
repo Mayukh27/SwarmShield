@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useScanStore } from "../store/scanStore";
 import { structureFor, SEVERITY_TONE, STATUS_COPY, integrityFromRisk } from "../theme/coc";
@@ -8,6 +8,8 @@ import AgentLogConsole from "../components/AgentLogConsole";
 import TroopSprite from "../components/sprites/TroopSprite";
 import FortressSprite from "../components/sprites/FortressSprite";
 import SiegeBackdrop from "../components/sprites/SiegeBackdrop";
+import AgentDetailPanel from "../components/AgentDetailPanel";
+import BattlePlanPanel from "../components/BattlePlanPanel";
 
 /**
  * Every visual beat here maps to real state already in the store — see
@@ -31,9 +33,11 @@ export default function LiveSiege({ onNavigate }) {
   const events = useScanStore((s) => s.events);
   const activeScan = useScanStore((s) => s.activeScan);
   const vulnerabilities = useScanStore((s) => s.vulnerabilities);
+  const attackDna = useScanStore((s) => s.attackDna);
   const [flashes, setFlashes] = useState([]); // transient breach flashes {id, structure, icon, severity}
   const [judgmentPulse, setJudgmentPulse] = useState(false);
   const [attackingAgent, setAttackingAgent] = useState(null);
+  const [inspectedAgent, setInspectedAgent] = useState(null);
   const lastEventCount = useRef(0);
   const lastVulnCount = useRef(0);
 
@@ -78,28 +82,56 @@ export default function LiveSiege({ onNavigate }) {
   const status = activeScan?.status;
   const isDone = status === "completed" || status === "failed" || status === "cancelled";
 
-  // Real troops = real agent_action events, deduped by agent, most recent first
-  const activeTroops = [];
-  const seen = new Set();
-  for (let i = events.length - 1; i >= 0 && activeTroops.length < 6; i--) {
-    const e = events[i];
-    if (e.event_type === "agent_action" && e.agent_type && !seen.has(e.agent_type)) {
-      seen.add(e.agent_type);
-      activeTroops.push(e);
+  // Real troops = real agent_action events, deduped by agent, most recent
+  // first. Memoized: this scan is O(events) and only needs to re-run when
+  // the event list actually grows, not on every unrelated rerender
+  // (flash timers, inspectedAgent toggles, etc).
+  const activeTroops = useMemo(() => {
+    const troops = [];
+    const seen = new Set();
+    for (let i = events.length - 1; i >= 0 && troops.length < 6; i--) {
+      const e = events[i];
+      if (e.event_type === "agent_action" && e.agent_type && !seen.has(e.agent_type)) {
+        seen.add(e.agent_type);
+        troops.push(e);
+      }
     }
-  }
+    return troops;
+  }, [events]);
 
   // Real structures = derived from real confirmed vulnerabilities' categories
-  const structureCategories = [...new Set(vulnerabilities.map((v) => v.owasp_category))];
+  const structureCategories = useMemo(
+    () => [...new Set(vulnerabilities.map((v) => v.owasp_category))],
+    [vulnerabilities]
+  );
+  const vulnCountByCategory = useMemo(() => {
+    const m = new Map();
+    vulnerabilities.forEach((v) => m.set(v.owasp_category, (m.get(v.owasp_category) || 0) + 1));
+    return m;
+  }, [vulnerabilities]);
 
   return (
-    <div className="grid h-full grid-cols-[1fr_320px] gap-3 overflow-hidden p-3">
+    <div className="grid h-full grid-cols-1 gap-3 overflow-hidden p-3 lg:grid-cols-[1fr_320px]">
       <div className="flex min-h-0 flex-col gap-3">
         {/* Battlefield */}
         <div className="relative flex-1 overflow-hidden rounded-lg border border-grid bg-panel">
           <SiegeBackdrop variant="battlefield" />
-          <div className="absolute left-3 top-3 z-10 font-mono text-[11px] text-text-muted">
-            Live Siege — {activeScan ? STATUS_COPY[status] : "no active scan"}
+          <div className="absolute left-3 top-3 z-10 flex flex-wrap items-center gap-3 font-mono text-[11px] text-text-muted">
+            <span>Live Siege — {activeScan ? STATUS_COPY[status] : "no active scan"}</span>
+            {activeScan && (
+              <span className="flex items-center gap-2 rounded border border-grid bg-void/60 px-2 py-1">
+                <span>Agents {activeTroops.length}</span>
+                <span className="text-grid">·</span>
+                <span>Attempts {activeScan.total_attempts ?? 0}</span>
+                <span className="text-grid">·</span>
+                <span>Findings {vulnerabilities.length}</span>
+                <span className="text-grid">·</span>
+                <span>
+                  Gen max{" "}
+                  {attackDna.length > 0 ? Math.max(...attackDna.map((d) => d.generation ?? 0)) : 0}
+                </span>
+              </span>
+            )}
           </div>
 
           <div className="flex h-full flex-col items-center justify-center pt-6">
@@ -142,7 +174,7 @@ export default function LiveSiege({ onNavigate }) {
             ) : (
               structureCategories.map((cat) => {
                 const s = structureFor(cat);
-                const count = vulnerabilities.filter((v) => v.owasp_category === cat).length;
+                const count = vulnCountByCategory.get(cat) || 0;
                 return (
                   <div
                     key={cat}
@@ -164,16 +196,25 @@ export default function LiveSiege({ onNavigate }) {
           {/* Troops = real active agents right now */}
           <div className="absolute inset-x-0 top-10 flex flex-wrap justify-center gap-3 px-3">
             {activeTroops.map((e, i) => (
-              <motion.div
+              <motion.button
                 key={`${e.agent_type}-${i}`}
                 initial={{ x: -20, opacity: 0 }}
                 animate={{ x: 0, opacity: 1 }}
-                className="rounded-lg border border-gold/30 bg-gold-dim/40 px-2 py-1.5 backdrop-blur-sm"
+                onClick={() => setInspectedAgent(inspectedAgent === e.agent_type ? null : e.agent_type)}
+                className={`rounded-lg border px-2 py-1.5 backdrop-blur-sm transition-colors ${
+                  inspectedAgent === e.agent_type
+                    ? "border-gold bg-gold-dim/70"
+                    : "border-gold/30 bg-gold-dim/40 hover:bg-gold-dim/60"
+                }`}
               >
                 <TroopSprite agentType={e.agent_type} size={34} attacking={attackingAgent === e.agent_type} />
-              </motion.div>
+              </motion.button>
             ))}
           </div>
+
+          {inspectedAgent && (
+            <AgentDetailPanel agentType={inspectedAgent} onClose={() => setInspectedAgent(null)} />
+          )}
         </div>
 
         {/* Real live text log, unchanged logic, just reframed */}
@@ -192,7 +233,8 @@ export default function LiveSiege({ onNavigate }) {
       </div>
 
       {/* Side panels: real Memory + real Attack DNA, just restyled */}
-      <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
+      <div className="flex min-h-0 flex-col gap-3 overflow-y-auto lg:max-h-full">
+        <BattlePlanPanel />
         <MemoryPanel />
         <AttackDnaPanel />
       </div>

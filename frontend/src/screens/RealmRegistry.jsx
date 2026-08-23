@@ -10,7 +10,17 @@ export default function RealmRegistry({ onDeclareWar, scanInFlight }) {
   const selectTarget = useScanStore((s) => s.selectTarget);
 
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: "", endpoint_url: "", tools: "", authorized: false });
+  const [form, setForm] = useState({
+    name: "",
+    endpoint_url: "",
+    tools: "",
+    authorized: false,
+    code_visibility: "unknown",
+    access_mode: "read_only",
+    allow_pr_creation: false,
+    allow_branch_write: false,
+    allow_direct_patch_apply: false,
+  });
   const [submitting, setSubmitting] = useState(false);
 
   const loadTargets = async () => {
@@ -38,10 +48,25 @@ export default function RealmRegistry({ onDeclareWar, scanInFlight }) {
         authorization_note: form.authorized
           ? "Attested at registration: operator owns or has written permission to test this target."
           : null,
+        code_visibility: form.code_visibility,
+        access_mode: form.access_mode,
+        allow_pr_creation: form.code_visibility === "public" || form.allow_pr_creation,
+        allow_branch_write: form.access_mode === "read_write" && form.allow_branch_write,
+        allow_direct_patch_apply: form.access_mode === "read_write" && form.allow_direct_patch_apply,
       });
       await loadTargets();
       selectTarget(target.id);
-      setForm({ name: "", endpoint_url: "", tools: "", authorized: false });
+      setForm({
+        name: "",
+        endpoint_url: "",
+        tools: "",
+        authorized: false,
+        code_visibility: "unknown",
+        access_mode: "read_only",
+        allow_pr_creation: false,
+        allow_branch_write: false,
+        allow_direct_patch_apply: false,
+      });
       setShowForm(false);
     } finally {
       setSubmitting(false);
@@ -96,6 +121,76 @@ export default function RealmRegistry({ onDeclareWar, scanInFlight }) {
             onChange={(e) => setForm({ ...form, tools: e.target.value })}
             className="rounded border border-grid bg-void px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:border-gold"
           />
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="flex flex-col gap-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+              Code visibility
+              <select
+                value={form.code_visibility}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    code_visibility: e.target.value,
+                    allow_pr_creation: e.target.value === "public" ? true : form.allow_pr_creation,
+                  })
+                }
+                className="rounded border border-grid bg-void px-2.5 py-1.5 text-sm normal-case tracking-normal text-text-primary focus:border-gold"
+              >
+                <option value="unknown">Read-only / unknown</option>
+                <option value="public">Public codebase</option>
+                <option value="private">Private codebase</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+              SwarmShield code access
+              <select
+                value={form.access_mode}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    access_mode: e.target.value,
+                    allow_branch_write: e.target.value === "read_write" && form.allow_branch_write,
+                    allow_direct_patch_apply: e.target.value === "read_write" && form.allow_direct_patch_apply,
+                  })
+                }
+                className="rounded border border-grid bg-void px-2.5 py-1.5 text-sm normal-case tracking-normal text-text-primary focus:border-gold"
+              >
+                <option value="read_only">Read only</option>
+                <option value="read_write">Read and write</option>
+              </select>
+            </label>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <label className="flex items-start gap-2 font-mono text-[11px] leading-snug text-text-muted">
+              <input
+                type="checkbox"
+                checked={form.code_visibility === "public" || form.allow_pr_creation}
+                disabled={form.code_visibility === "public"}
+                onChange={(e) => setForm({ ...form, allow_pr_creation: e.target.checked })}
+                className="mt-0.5 accent-gold"
+              />
+              <span>Allow PR creation</span>
+            </label>
+            <label className="flex items-start gap-2 font-mono text-[11px] leading-snug text-text-muted">
+              <input
+                type="checkbox"
+                checked={form.allow_branch_write}
+                disabled={form.access_mode !== "read_write"}
+                onChange={(e) => setForm({ ...form, allow_branch_write: e.target.checked })}
+                className="mt-0.5 accent-gold"
+              />
+              <span>Allow branch write</span>
+            </label>
+            <label className="flex items-start gap-2 font-mono text-[11px] leading-snug text-text-muted">
+              <input
+                type="checkbox"
+                checked={form.allow_direct_patch_apply}
+                disabled={form.access_mode !== "read_write"}
+                onChange={(e) => setForm({ ...form, allow_direct_patch_apply: e.target.checked })}
+                className="mt-0.5 accent-gold"
+              />
+              <span>Allow live apply</span>
+            </label>
+          </div>
           <label className="mt-1 flex items-start gap-2 font-mono text-[11px] leading-snug text-text-muted">
             <input
               type="checkbox"
@@ -152,6 +247,14 @@ export default function RealmRegistry({ onDeclareWar, scanInFlight }) {
                   )}
                 </div>
                 <div className="truncate font-mono text-[10px] text-text-muted">{t.endpoint_url}</div>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  <span className="rounded border border-grid bg-void px-1.5 py-0.5 font-mono text-[9px] uppercase text-text-muted">
+                    {t.code_visibility || "unknown"} code
+                  </span>
+                  <span className="rounded border border-grid bg-void px-1.5 py-0.5 font-mono text-[9px] uppercase text-text-muted">
+                    {t.access_mode}
+                  </span>
+                </div>
               </div>
               {selected && (
                 <motion.button
