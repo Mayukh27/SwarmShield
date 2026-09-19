@@ -38,7 +38,16 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
+  controlled-target:
+    build:
+      context: ./controlled_target
+    container_name: swarmshield-controlled-target
+    restart: unless-stopped
+    environment:
+      TARGET_HOST: 0.0.0.0
+      TARGET_PORT: 9100
+    ports:
+      - "9100:9100"
   api:
     build:
       context: .
