@@ -1,0 +1,63 @@
+# SwarmShield RBAC + taint policy. Point the gateway at it with:
+#   set SWARMSHIELD_POLICY=swarmshield\policies\default_policy.yaml   (Windows CMD)
+# Reload without restarting: POST /v1/policy/reload
+version: 2
+
+# Provenance labels treated as attacker-controllable (indirect prompt injection sources).
+untrusted_sources:
+  - untrusted_web
+  - email
+  - retrieved_document
+  - tool_output
+  - user_upload
+
+# Default deny: a role may only run tools matched by allowed_tools (fnmatch globs, "*" = all)
+# and never those matched by denied_tools. can_message (optional) restricts which roles
+# this role may hand messages to.
+roles:
+  # --- Generic demo roles (used by swarmshield/tests/simulate_attacks.py) ---
+  planner:
+    allowed_tools: [delegate_task, plan, summarize]
+    can_message: [planner, researcher, db_agent]
+  researcher:
+    allowed_tools: [web_search, fetch_url, summarize, delegate_task]
+    can_message: [planner, researcher, db_agent]
+  db_agent:
+    allowed_tools: [sql_select, sql_insert, summarize]
+    denied_tools: [sql_drop, sql_delete, sql_truncate, sql_execute, shell_exec]
+  admin:
+    allowed_tools: ["*"]
+
+  # --- Real SwarmShield orchestrator roles (backend/app/agents) ---
+  # These are the roles the orchestrator's live gateway wiring
+  # (backend/app/agents/orchestrator.py::_run_specialist_against_vector) sends as
+  # sender_role. A specialist may only probe the specific tool/area class its
+  # name implies. tool_abuse and privilege_escalation are the two specialists
+  # whose entire job is exercising dangerous tools -- everyone else is
+  # default-denied from destructive operations even though this is a
+  # red-team system, so a prompt-injection or jailbreak payload that manages
+  # to steer itself into calling sql_drop / shell_exec still gets caught
+  # here, not just by the injection scanner.
+  prompt_injection_specialist:
+    allowed_tools: ["*"]
+    denied_tools: [sql_drop, sql_truncate, sql_delete, sql_execute, shell_exec]
+  jailbreak_specialist:
+    allowed_tools: ["*"]
+    denied_tools: [sql_drop, sql_truncate, sql_delete, sql_execute, shell_exec]
+  data_exfiltration_specialist:
+    allowed_tools: ["*"]
+    denied_tools: [sql_drop, sql_truncate, shell_exec]
+  tool_abuse_specialist:
+    allowed_tools: ["*"]
+  privilege_escalation_specialist:
+    allowed_tools: ["*"]
+
+# Per-tool metadata. block_untrusted_provenance stops the confused-deputy attack: even a
+# role that is allowed to run the tool cannot be steered into it by tainted content.
+tools:
+  sql_drop:     { risk: critical, block_untrusted_provenance: true }
+  sql_truncate: { risk: critical, block_untrusted_provenance: true }
+  sql_delete:   { risk: high,     block_untrusted_provenance: true }
+  sql_execute:  { risk: high,     block_untrusted_provenance: true }
+  shell_exec:   { risk: critical, block_untrusted_provenance: true }
+  send_email:   { risk: high,     block_untrusted_provenance: true }

@@ -1,0 +1,71 @@
+services:
+  db:
+    image: postgres:16
+    container_name: swarmshield-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-swarmshield}
+      POSTGRES_USER: ${POSTGRES_USER:-swarmshield}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-swarmshield}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-swarmshield} -d ${POSTGRES_DB:-swarmshield}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  swarmshield-gateway:
+    build:
+      context: .
+      dockerfile: swarmshield/Dockerfile
+    container_name: swarmshield-gateway
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    environment:
+      SWARMSHIELD_POLICY: /app/swarmshield/policies/default_policy.yaml
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: swarmshield-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-swarmshield}:${POSTGRES_PASSWORD:-swarmshield}@db:5432/${POSTGRES_DB:-swarmshield}
+      SWARMSHIELD_URL: http://swarmshield-gateway:8000
+      SWARMSHIELD_FAIL_MODE: open
+    depends_on:
+      db:
+        condition: service_healthy
+      swarmshield-gateway:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: swarmshield-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
