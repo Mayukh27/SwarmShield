@@ -103,6 +103,9 @@ class Settings:
 
     # Agent quarantine
     quarantine_after: int = 3  # violations before quarantine (severe = immediate)
+    # Principals that are blocked per message but never quarantined (matched on the id before the first ':').
+    # Anonymous end users and your own trusted assistant should not be lockable by an attacker.
+    no_quarantine: tuple[str, ...] = ("user",)
     inspect_ttl_s: float = 30.0  # how long an agent stays "inspected" after a flag
 
     @classmethod
@@ -124,6 +127,9 @@ class Settings:
             token_budget=_env_int("SWARMSHIELD_TOKEN_BUDGET", cls.token_budget),
             breaker_cooldown_s=_env_int("SWARMSHIELD_BREAKER_COOLDOWN", cls.breaker_cooldown_s),
             quarantine_after=_env_int("SWARMSHIELD_QUARANTINE_AFTER", cls.quarantine_after),
+            no_quarantine=tuple(
+                x.strip() for x in os.getenv("SWARMSHIELD_NO_QUARANTINE", ",".join(cls.no_quarantine)).split(",") if x.strip()
+            ),
             inspect_ttl_s=_env_float("SWARMSHIELD_INSPECT_TTL", cls.inspect_ttl_s),
         )
 
@@ -175,6 +181,8 @@ class TransferResponse(BaseModel):
     sender_status: AgentStatus = AgentStatus.NORMAL
     requires_human_review: bool = False
     retry_after: Optional[int] = None
+    quarantined_agents: list[str] = Field(default_factory=list)
+    evidence: dict[str, Any] = Field(default_factory=dict)
     latency_ms: float = 0.0
 
 
@@ -211,7 +219,7 @@ _RULES: tuple[tuple[str, str, float, re.Pattern[str]], ...] = tuple(
         (
             "override_instructions", "instruction_override", 0.80,
             r"\b(?:ignore|disregard|forget|override|bypass)\b[^.\n]{0,40}\b(?:previous|prior|above|earlier|all|any|your|the)\b"
-            r"[^.\n]{0,40}\b(?:instructions?|prompts?|rules?|guidelines?|directives?|constraints?|policies|policy)\b",
+            r"[^.\n]{0,40}\b(?:instructions?|prompts?|rules?|guidelines?|directives?|constraints?|restrictions?|policies|policy)\b",
         ),
         (
             "role_hijack", "role_hijack", 0.45,
@@ -245,7 +253,7 @@ _RULES: tuple[tuple[str, str, float, re.Pattern[str]], ...] = tuple(
         ),
         (
             "authority_spoof", "authority_spoofing", 0.50,
-            r"\b(?:admin(?:istrator)?|developer|system|root|security team)\s+(?:override|mode|message|says|command|notice)\b"
+            r"\b(?:admin(?:istrator)?|developer|system|root|security team)\s+(?:override|mode|message|says|command|notice)\b|\bsystem update\s*[-:]"
             r"|\bauthori[sz]ed by\s+(?:the\s+)?(?:admin|system|developer)",
         ),
         (
@@ -256,6 +264,12 @@ _RULES: tuple[tuple[str, str, float, re.Pattern[str]], ...] = tuple(
             # Weak on its own (normal delegation looks like this); matters in combination.
             "agent_redirect", "delegation_hijack", 0.25,
             r"\b(?:tell|instruct|ask|command|order)\s+(?:the\s+)?(?:\w+\s+){0,2}(?:agent|assistant|bot)\s+to\b",
+        ),
+        (
+            # Data-leak signal on outbound/tool output (weak on its own: flags for inspection, never blocks).
+            "sensitive_data_disclosure", "data_leak", 0.40,
+            r"\bconfidential\s*:|\binternal use only\b|-----begin (?:rsa |ec |openssh )?private key-----"
+            r"|\b(?:api[_-]?key|secret|password|passwd)\s*[:=]\s*\S{6,}",
         ),
         ("hidden_html_comment", "obfuscation", 0.30, r"<!--.{0,400}?-->"),
     )
@@ -405,7 +419,9 @@ class PolicyEngine:
     def _matches(patterns: list[str], value: str) -> bool:
         return any(fnmatch.fnmatchcase(value, p) for p in patterns)
 
-    def check_tool(self, *, role: str, tool: str, provenance: list[str]) -> PolicyDecision:
+    def check_tool(
+        self, *, role: str, tool: str, provenance: list[str], args: Optional[dict[str, Any]] = None
+    ) -> PolicyDecision:
         cfg = self._roles.get(role)
         if cfg is None:
             return PolicyDecision(False, f"unknown role '{role}' (default deny)", "rbac")
@@ -414,6 +430,17 @@ class PolicyEngine:
         if not self._matches(cfg.get("allowed_tools", []), tool):
             return PolicyDecision(False, f"role '{role}' is not permitted to run tool '{tool}'", "rbac")
         tool_cfg = self._tools.get(tool, {})
+
+        # Argument-level rules, e.g. read_file may not touch internal_* paths unless the role is exempt.
+        restricted: dict[str, list[str]] = tool_cfg.get("restricted_args") or {}
+        if restricted and role not in tool_cfg.get("restricted_unless_roles", []):
+            for arg_name, patterns in restricted.items():
+                value = (args or {}).get(arg_name)
+                if isinstance(value, str) and self._matches(patterns, value.lower()):
+                    return PolicyDecision(
+                        False, f"argument {arg_name}={value!r} is restricted for role '{role}' on tool '{tool}'", "rbac"
+                    )
+
         if tool_cfg.get("block_untrusted_provenance") and self.is_untrusted(provenance):
             return PolicyDecision(
                 False,
@@ -474,6 +501,16 @@ class ConversationState:
     last_seen: float = field(default_factory=time.monotonic)
 
 
+@dataclass(frozen=True)
+class Trip:
+    """Why (and how badly) a conversation tripped the breaker; returned as evidence to clients."""
+
+    reason: str
+    kind: str  # depth | velocity | repetition | pingpong | tokens
+    transfers: int
+    est_tokens: int
+
+
 class CircuitBreaker:
     """Stateful per-conversation infinite-loop / runaway-cost detector.
 
@@ -506,8 +543,8 @@ class CircuitBreaker:
         for key in stale:
             del self._convs[key]
 
-    def observe(self, conversation_id: str, sender: str, receiver: str, message: str, hop_count: int) -> Optional[str]:
-        """Record a transfer. Returns a trip reason, or None if the conversation is healthy."""
+    def observe(self, conversation_id: str, sender: str, receiver: str, message: str, hop_count: int) -> Optional[Trip]:
+        """Record a transfer. Returns a ``Trip`` if a limit was hit, or None if the conversation is healthy."""
         s = self._s
         now = time.monotonic()
         if len(self._convs) > 1024:
@@ -522,17 +559,18 @@ class CircuitBreaker:
         st.entries.append(current)
 
         reason: Optional[str] = None
+        kind = ""
 
         # 1) recursion depth
         depth = hop_count if hop_count > 0 else st.transfers
         if depth > s.max_depth:
-            reason = f"recursion depth {depth} exceeds limit {s.max_depth}"
+            reason, kind = f"recursion depth {depth} exceeds limit {s.max_depth}", "depth"
 
         # 2) velocity
         if reason is None:
             in_window = sum(1 for e in st.entries if now - e.ts <= s.velocity_window_s)
             if in_window > s.velocity_max:
-                reason = f"message velocity {in_window}/{s.velocity_window_s:.0f}s exceeds {s.velocity_max}"
+                reason, kind = f"message velocity {in_window}/{s.velocity_window_s:.0f}s exceeds {s.velocity_max}", "velocity"
 
         # 3) semantic repetition (near-duplicate payloads on the same edge)
         if reason is None:
@@ -542,7 +580,7 @@ class CircuitBreaker:
                 if e.sender == sender and e.receiver == receiver and _jaccard(e.sig, current.sig) >= s.repeat_similarity
             )
             if dupes >= s.repeat_count:
-                reason = f"semantic repetition: {dupes + 1} near-identical messages {sender} -> {receiver}"
+                reason, kind = f"semantic repetition: {dupes + 1} near-identical messages {sender} -> {receiver}", "repetition"
 
         # 4) ping-pong delegation loop: A->B, B->A, A->B ... with similar content
         if reason is None and s.pingpong_cycles > 0:
@@ -555,16 +593,17 @@ class CircuitBreaker:
                 if alternating and min(
                     _jaccard(window[i].sig, window[i + 2].sig) for i in range(len(window) - 2)
                 ) >= s.pingpong_similarity:
-                    reason = f"recursive delegation loop between {a} and {b} ({s.pingpong_cycles} cycles)"
+                    reason, kind = f"recursive delegation loop between {a} and {b} ({s.pingpong_cycles} cycles)", "pingpong"
 
         # 5) token budget
         if reason is None and st.est_tokens > s.token_budget:
-            reason = f"estimated token usage {st.est_tokens} exceeds budget {s.token_budget}"
+            reason, kind = f"estimated token usage {st.est_tokens} exceeds budget {s.token_budget}", "tokens"
 
         if reason:
             st.tripped_at = now
             st.trip_reason = reason
-        return reason
+            return Trip(reason, kind, st.transfers, st.est_tokens)
+        return None
 
     def snapshot(self) -> list[dict[str, Any]]:
         return [
@@ -629,6 +668,10 @@ class AgentRegistry:
         if rec is None:
             return AgentStatus.NORMAL
         rec.violations += 1
+        if agent_id.split(":", 1)[0] in self._s.no_quarantine:
+            # e.g. anonymous end users: blocked message by message, never globally locked out
+            # (quarantining a shared principal would be a denial-of-service lever for an attacker).
+            return rec.status
         if severe or rec.violations >= self._s.quarantine_after:
             rec.status = AgentStatus.QUARANTINED
             rec.quarantine_reason = reason
@@ -694,6 +737,8 @@ class Evaluation:
     violation_type: Optional[str]
     findings: list[Finding]
     retry_after: Optional[int] = None
+    quarantined: list[str] = field(default_factory=list)  # agents newly/already quarantined by this decision
+    evidence: dict[str, Any] = field(default_factory=dict)
 
 
 class GatewayState:
@@ -711,6 +756,11 @@ class GatewayState:
     def reload_policy(self) -> None:
         self.policy = PolicyEngine.load(self.settings.policy_path)
         self.detector = InjectionDetector(self.policy.untrusted_sources)
+
+    def _violate(self, agent_id: str, *, severe: bool, reason: str) -> list[str]:
+        """Record a violation; returns [agent_id] if that agent is now quarantined."""
+        status = self.registry.record_violation(agent_id, severe=severe, reason=reason)
+        return [agent_id] if status is AgentStatus.QUARANTINED else []
 
     def evaluate(self, req: TransferRequest) -> Evaluation:
         s = self.settings
@@ -735,27 +785,36 @@ class GatewayState:
         policy_denial: Optional[PolicyDecision] = self.policy.check_messaging(req.sender_role, req.receiver_role)
         if policy_denial.allowed and req.target_tool:
             executor_role = req.receiver_role or req.sender_role  # the role that will run the tool
-            policy_denial = self.policy.check_tool(role=executor_role, tool=req.target_tool, provenance=req.provenance)
+            policy_denial = self.policy.check_tool(
+                role=executor_role, tool=req.target_tool, provenance=req.provenance, args=req.tool_args
+            )
         if not policy_denial.allowed:
             findings.append(Finding(policy_denial.violation_type, "policy", 1.0, policy_denial.reason))
             risk = max(score, 0.8)
-            self.registry.record_violation(req.sender_id, severe=risk >= 0.9, reason=policy_denial.reason)
-            return Evaluation(Verdict.BLOCK, risk, policy_denial.reason, policy_denial.violation_type, findings)
+            quarantined = self._violate(req.sender_id, severe=risk >= 0.9, reason=policy_denial.reason)
+            return Evaluation(
+                Verdict.BLOCK, risk, policy_denial.reason, policy_denial.violation_type, findings, quarantined=quarantined
+            )
 
         # 5) injection threshold
         if score >= s.block_threshold:
             rules = ", ".join(f.rule for f in findings)
-            reason = f"indirect prompt injection detected ({rules})"
-            self.registry.record_violation(req.sender_id, severe=score >= 0.9, reason=reason)
-            return Evaluation(Verdict.BLOCK, score, reason, "prompt_injection", findings)
+            reason = f"prompt injection detected ({rules})"
+            quarantined = self._violate(req.sender_id, severe=score >= 0.9, reason=reason)
+            return Evaluation(Verdict.BLOCK, score, reason, "prompt_injection", findings, quarantined=quarantined)
 
         # 6) circuit breaker (only for messages that passed security checks)
-        trip_reason = self.breaker.observe(
-            req.conversation_id, req.sender_id, req.receiver_id, req.message, req.hop_count
-        )
-        if trip_reason:
-            self.registry.mark_inspected(req.sender_id)
-            return Evaluation(Verdict.TRIP, score, trip_reason, "circuit_breaker", findings, s.breaker_cooldown_s)
+        trip = self.breaker.observe(req.conversation_id, req.sender_id, req.receiver_id, req.message, req.hop_count)
+        if trip:
+            # A runaway loop involves BOTH agents: quarantine sender and receiver (unless exempt).
+            parties = [req.sender_id] + ([req.receiver_id] if trip.kind in {"pingpong", "repetition", "depth"} else [])
+            quarantined = [a for p in parties for a in self._violate(p, severe=True, reason=trip.reason)]
+            return Evaluation(
+                Verdict.TRIP, score, trip.reason, "circuit_breaker", findings, s.breaker_cooldown_s,
+                quarantined=quarantined,
+                evidence={"kind": trip.kind, "transfers": trip.transfers, "est_tokens": trip.est_tokens,
+                          "cooldown_s": s.breaker_cooldown_s},
+            )
 
         # 7) suspicious but not conclusive -> human review
         if score >= s.flag_threshold:
@@ -828,6 +887,8 @@ async def a2a_transfer(req: TransferRequest, request: Request, _auth: None = Dep
         sender_status=sender_status,
         requires_human_review=result.verdict is Verdict.FLAG,
         retry_after=result.retry_after,
+        quarantined_agents=result.quarantined,
+        evidence=result.evidence,
         latency_ms=round((time.perf_counter() - started) * 1000, 3),
     )
 
@@ -847,6 +908,9 @@ async def a2a_transfer(req: TransferRequest, request: Request, _auth: None = Dep
             "violation_type": body.violation_type,
             "reason": result.reason,
             "rules": [f.rule for f in result.findings],
+            "http_status": _STATUS_FOR_VERDICT[result.verdict],
+            "quarantined_agents": result.quarantined,
+            "evidence": result.evidence,
             "sender_status": sender_status.value,
             "receiver_status": gw.registry.effective(req.receiver_id).value,
             "preview": re.sub(r"\s+", " ", req.message)[:140],
@@ -861,6 +925,13 @@ async def a2a_transfer(req: TransferRequest, request: Request, _auth: None = Dep
 async def health(request: Request) -> dict[str, Any]:
     gw: GatewayState = request.app.state.gw
     return {"status": "ok", "policy_version": gw.policy.version, "counters": gw.counters}
+
+
+@app.get("/v1/events", dependencies=[Depends(require_api_key)])
+async def recent_events(request: Request, limit: int = Query(default=50, ge=1, le=200)) -> dict[str, Any]:
+    """Most recent gateway decisions (same payloads as the WebSocket stream)."""
+    gw: GatewayState = request.app.state.gw
+    return {"events": list(gw.hub.history)[-limit:], "counters": gw.counters}
 
 
 @app.get("/v1/agents", dependencies=[Depends(require_api_key)])

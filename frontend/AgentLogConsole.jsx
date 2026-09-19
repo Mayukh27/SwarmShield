@@ -24,16 +24,11 @@ const EVENT_PREFIX = {
   capability_unknown_discovered: "UNK",
   capability_scan_completed: "CAP",
   capability_coverage_updated: "COV",
-  security_blocked: "SEC",
-  security_circuit_breaker: "SEC",
 };
 
 // Which event types carry real evidence worth expanding — everything else
 // (agent_action, scan_status) is already fully expressed by its message.
-const EXPANDABLE = new Set([
-  "sentinel_verdict", "vulnerability_found", "dna_mutation", "memory_consulted",
-  "security_blocked", "security_circuit_breaker",
-]);
+const EXPANDABLE = new Set(["sentinel_verdict", "vulnerability_found", "dna_mutation", "memory_consulted"]);
 
 function EvidenceRow({ label, value }) {
   if (value === undefined || value === null || value === "") return null;
@@ -87,22 +82,6 @@ function Evidence({ event, vulnerability }) {
         <EvidenceRow label="Vector" value={d.vector_id} />
         <EvidenceRow label="Generation" value={d.generation} />
         <EvidenceRow label="Mutation" value={d.mutation} />
-      </div>
-    );
-  }
-  if (event.event_type === "security_blocked" || event.event_type === "security_circuit_breaker") {
-    return (
-      <div className="ml-16 mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 rounded border border-critical/30 bg-critical-dim/40 px-3 py-2 font-mono text-[11px]">
-        <EvidenceRow label="Verdict" value={event.event_type === "security_circuit_breaker" ? "TRIP (429)" : "BLOCK (403)"} />
-        <EvidenceRow label="Violation type" value={d.violation_type} />
-        <EvidenceRow label="Risk score" value={d.risk_score} />
-        <EvidenceRow label="Retry after (s)" value={d.retry_after} />
-        {d.findings && d.findings.length > 0 && (
-          <div className="col-span-full">
-            <span className="text-text-muted">Findings: </span>
-            <span className="text-text-primary">{d.findings.map((f) => f.rule).join(", ")}</span>
-          </div>
-        )}
       </div>
     );
   }

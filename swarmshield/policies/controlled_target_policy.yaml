@@ -1,0 +1,44 @@
+# RBAC + taint policy for the bundled controlled target (User -> LLM -> RAG -> Mock Tools).
+# Used by docker-compose:  SWARMSHIELD_POLICY=/app/swarmshield/policies/controlled_target_policy.yaml
+version: 1
+
+# "tainted_context" is added by the target when any prompt/document was flagged as suspicious.
+untrusted_sources: [untrusted_web, email, retrieved_document, tool_output, user_upload, tainted_context, untrusted_target_output]
+
+roles:
+  # Multi-agent roles used by the Security Demo and the scan monitor.
+  planner:
+    allowed_tools: [delegate_task, plan, summarize]
+    can_message: [planner, researcher, db_agent, specialist, sentinel]
+  researcher:
+    allowed_tools: [web_search, fetch_url, summarize, delegate_task]
+    can_message: [planner, researcher, db_agent]
+  db_agent:
+    allowed_tools: [sql_select, sql_insert, summarize]
+    denied_tools: [sql_drop, sql_delete, sql_truncate, sql_execute, shell_exec]
+  # Assistant acting for a normal customer session (caller_role = "user").
+  support_assistant:
+    allowed_tools: [read_file, send_email]
+    denied_tools: [execute_admin_action]
+  # Assistant acting for a verified admin session (caller_role = "admin").
+  admin_assistant:
+    allowed_tools: ["*"]
+
+tools:
+  sql_drop:     { risk: critical, block_untrusted_provenance: true }
+  sql_truncate: { risk: critical, block_untrusted_provenance: true }
+  sql_delete:   { risk: high,     block_untrusted_provenance: true }
+  sql_execute:  { risk: high,     block_untrusted_provenance: true }
+  shell_exec:   { risk: critical, block_untrusted_provenance: true }
+  read_file:
+    risk: high
+    # Confidential paths are unreadable for every role except the ones listed below.
+    restricted_args: { path: ["internal_*", "*confidential*", "*secret*", "*.env"] }
+    restricted_unless_roles: [admin_assistant]
+    block_untrusted_provenance: true
+  send_email:
+    risk: high
+    block_untrusted_provenance: true
+  execute_admin_action:
+    risk: critical
+    block_untrusted_provenance: true

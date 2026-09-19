@@ -1,80 +1,85 @@
 services:
   db:
-    image: postgres:16
-    container_name: swarmshield-db
-    restart: unless-stopped
+    image: postgres:16-alpine
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-swarmshield}
-      POSTGRES_USER: ${POSTGRES_USER:-swarmshield}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-swarmshield}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      POSTGRES_DB: swarmshield
+      POSTGRES_USER: swarmshield
+      POSTGRES_PASSWORD: swarmshield
+    ports: ["5432:5432"]
+    volumes: [postgres_data:/var/lib/postgresql/data]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-swarmshield} -d ${POSTGRES_DB:-swarmshield}"]
+      test: ["CMD-SHELL", "pg_isready -U swarmshield -d swarmshield"]
       interval: 5s
-      timeout: 5s
+      timeout: 3s
       retries: 10
 
+  # Authorized, local-only vulnerable target: User -> LLM -> RAG -> Mock Tools.
+  # This is what the swarm attacks. See controlled_target/app.py for the
+  # documented, intentional vulnerabilities. SAFE_MODE=True always; it makes
+  # no outbound network calls of its own.
+  # SwarmShield runtime gateway: inspects messages, RAG documents and tool calls on behalf of
+  # the target. The red-team platform attacks; this defends. Toggle it per demo, see
+  # docs/SHIELD_INTEGRATION.md.
   swarmshield-gateway:
     build:
       context: .
       dockerfile: swarmshield/Dockerfile
-    container_name: swarmshield-gateway
-    restart: unless-stopped
-    ports:
-      - "8001:8000"
     environment:
-      SWARMSHIELD_POLICY: /app/swarmshield/policies/default_policy.yaml
+      SWARMSHIELD_API_KEY: ${SWARMSHIELD_API_KEY:-}
+      SWARMSHIELD_CORS: http://localhost:5173,http://localhost:3000
+      # principals that get blocked per message but are never quarantined (attacker-triggerable DoS otherwise)
+      SWARMSHIELD_NO_QUARANTINE: user,support_assistant,target,planner
+    ports: ["8100:8100"]
     healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8100/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   controlled-target:
-    build:
-      context: ./controlled_target
-    container_name: swarmshield-controlled-target
-    restart: unless-stopped
+    build: ./controlled_target
+    depends_on:
+      swarmshield-gateway:
+        condition: service_healthy
     environment:
-      TARGET_HOST: 0.0.0.0
-      TARGET_PORT: 9100
-    ports:
-      - "9100:9100"
+      TARGET_HOST: "0.0.0.0"
+      TARGET_PORT: "9100"
+      SWARMSHIELD_GATEWAY_URL: http://swarmshield-gateway:8100
+      SWARMSHIELD_API_KEY: ${SWARMSHIELD_API_KEY:-}
+      # false = vulnerable baseline; true = every request goes through the gateway from the start
+      SHIELD_ENABLED_AT_START: ${SHIELD_ENABLED_AT_START:-false}
+      # both (default): 'Apply patch & re-validate' applies the built-in patch AND routes the target through the gateway.
+      # sanitizer = original behaviour only | shield = gateway only
+      APPLY_PATCH_MODE: ${APPLY_PATCH_MODE:-both}
+      # Optional: set to use real Gemini for the target's own responses too.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    ports: ["9100:9100"]
+
   api:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    container_name: swarmshield-api
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
+    build: ./backend
+    env_file: .env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-swarmshield}:${POSTGRES_PASSWORD:-swarmshield}@db:5432/${POSTGRES_DB:-swarmshield}
-      SWARMSHIELD_URL: http://swarmshield-gateway:8000
-      SWARMSHIELD_FAIL_MODE: open
+      DATABASE_URL: postgresql+psycopg2://swarmshield:swarmshield@db:5432/swarmshield
+      SWARMSHIELD_GATEWAY_URL: http://swarmshield-gateway:8100
+      SWARMSHIELD_API_KEY: ${SWARMSHIELD_API_KEY:-}
+      CONTROLLED_TARGET_URL: http://controlled-target:9100
+      SEED_DEMO_TARGET: "true"
+      DEMO_TARGET_URL: http://controlled-target:9100/chat
+      # Leave GEMINI_API_KEY unset to run the swarm on the deterministic
+      # offline fallback engine (app/services/fallback_engine.py); set it
+      # to drive the planner/specialists/sentinel/remediation with real Gemini.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    ports: ["8000:8000"]
     depends_on:
       db:
         condition: service_healthy
-      swarmshield-gateway:
-        condition: service_healthy
+      controlled-target:
+        condition: service_started
 
   frontend:
-    build:
-      context: ./frontend
-    container_name: swarmshield-frontend
-    restart: unless-stopped
-    ports:
-      - "5173:80"
-    depends_on:
-      - api
+    build: ./frontend
+    ports: ["5173:80"]
+    depends_on: [api]
 
 volumes:
   postgres_data:

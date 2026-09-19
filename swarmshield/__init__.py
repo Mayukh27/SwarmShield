@@ -6,7 +6,6 @@ from swarmshield.exceptions import (
     SwarmShieldSecurityException,
     SwarmShieldUnavailableError,
 )
-from swarmshield.sdk import check, protect_agent
 
 __version__ = "0.1.0"
 
@@ -15,7 +14,5 @@ __all__ = [
     "SwarmShieldSecurityException",
     "SwarmShieldCircuitBreakerException",
     "SwarmShieldUnavailableError",
-    "protect_agent",
-    "check",
     "__version__",
 ]

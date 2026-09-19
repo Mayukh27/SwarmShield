@@ -1,25 +1,24 @@
 import { useMemo, useState } from "react";
 import { useScanStore } from "../store/scanStore";
 import { deriveAgentStates } from "../theme/roster";
-import { useAgentSecurityStates } from "../hooks/useAgentSecurityStates";
 import AgentLogConsole from "../components/AgentLogConsole";
 import BattlePlanPanel from "../components/BattlePlanPanel";
 import MemoryPanel from "../components/MemoryPanel";
 import AttackDnaPanel from "../components/AttackDnaPanel";
 import AgentDetailPanel from "../components/AgentDetailPanel";
-import SecurityGraphCanvas from "../components/flow/SecurityGraphCanvas";
-import SecurityEventPanel from "../components/SecurityEventPanel";
+import SecurityPanel, { ShieldBadge, useShieldStore } from "../components/SecurityPanel";
 
 export default function Agents({ scanInFlight }) {
   const events = useScanStore((s) => s.events);
   const activeScan = useScanStore((s) => s.activeScan);
   const [selectedAgent, setSelectedAgent] = useState(null);
+  const shieldAgents = useShieldStore((s) => s.agents);
+  const shieldStatus = useMemo(() => Object.fromEntries(shieldAgents.map((a) => [a.agent_id, a.status])), [shieldAgents]);
 
   const agents = useMemo(
     () => deriveAgentStates(events, scanInFlight, activeScan?.status),
     [events, scanInFlight, activeScan?.status]
   );
-  const agentSecurityStates = useAgentSecurityStates(events);
 
   return (
     <div className="relative min-h-full p-6 lg:p-8">
@@ -51,7 +50,10 @@ export default function Agents({ scanInFlight }) {
             >
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-sm font-medium text-text-primary">{agent.name}</p>
+                  <p className="text-sm font-medium text-text-primary">
+                    {agent.name}
+                    <ShieldBadge status={shieldStatus[agent.type]} />
+                  </p>
                   <p className="mt-1 text-[9px] tracking-widest text-white/25">{agent.group}</p>
                 </div>
                 <span
@@ -72,28 +74,9 @@ export default function Agents({ scanInFlight }) {
         </div>
       </section>
 
-      {/* A2A SECURITY — live SwarmShield gateway state per agent, driven by
-          real security_blocked / security_circuit_breaker SSE events (see
-          hooks/useAgentSecurityStates.js). 🟢 normal · 🟡 inspected · 🔴 quarantined. */}
-      <section className="mt-6 grid gap-6 xl:grid-cols-3">
-        <div className="glass overflow-hidden rounded-2xl xl:col-span-2">
-          <div className="flex items-center justify-between border-b border-white/10 p-5">
-            <div>
-              <h2 className="font-medium text-text-primary">A2A Security</h2>
-              <p className="mt-1 text-[11px] text-white/30">
-                Live gateway state per agent — every specialist's payload passes through
-                SwarmShield's injection scan, RBAC policy, and circuit breaker before it
-                reaches the target.
-              </p>
-            </div>
-          </div>
-          <div className="p-3">
-            <SecurityGraphCanvas agentStates={agentSecurityStates} />
-          </div>
-        </div>
-        <div className="xl:col-span-1">
-          <SecurityEventPanel events={events} />
-        </div>
+      {/* A2A RUNTIME SECURITY: SwarmShield gateway watching the swarm + one-click security demo */}
+      <section className="mt-6">
+        <SecurityPanel />
       </section>
 
       {/* PLAN + LIVE LOG */}

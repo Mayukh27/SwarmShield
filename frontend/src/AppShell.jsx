@@ -18,10 +18,12 @@ import WarRoom from "./screens/WarRoom";
 import LiveSiege from "./screens/LiveSiege";
 import Outcome from "./screens/Outcome";
 import Timeline from "./screens/Timeline";
+import Security from "./screens/Security";
 
 const TITLES = {
   dashboard: { eyebrow: "SECURITY OPERATIONS", title: "Command Center" },
   agents: { eyebrow: "SECURITY OPERATIONS", title: "AI Agents" },
+  security: { eyebrow: "SECURITY OPERATIONS", title: "A2A Security" },
   targets: { eyebrow: "SECURITY OPERATIONS", title: "Targets" },
   vulnerabilities: { eyebrow: "SECURITY OPERATIONS", title: "Vulnerabilities" },
   patches: { eyebrow: "SECURITY OPERATIONS", title: "Patch Center" },
@@ -128,6 +130,7 @@ export default function AppShell() {
             <Dashboard onNavigate={goToScreen} onDeclareWar={handleDeclareWar} scanInFlight={scanInFlight} />
           )}
           {screen === "agents" && <Agents scanInFlight={scanInFlight} />}
+          {screen === "security" && <Security />}
           {screen === "targets" && (
             <RealmRegistry onDeclareWar={handleDeclareWar} scanInFlight={scanInFlight} />
           )}

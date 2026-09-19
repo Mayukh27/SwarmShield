@@ -81,6 +81,15 @@ class Settings(BaseSettings):
     CAPABILITY_WEIGHT_COVERAGE_GAP: float = 0.10
     CAPABILITY_WEIGHT_PREVIOUS_FAILURE_PENALTY: float = 0.15  # subtracted, not added
 
+    # --- SwarmShield runtime gateway (optional; see /swarmshield and docs/SHIELD_INTEGRATION.md) ---
+    # Leave SWARMSHIELD_GATEWAY_URL blank to disable the read-only /shield routes.
+    SWARMSHIELD_GATEWAY_URL: str = ""
+    SWARMSHIELD_API_KEY: str = ""
+    CONTROLLED_TARGET_URL: str = "http://localhost:9100"
+    # Demo convenience: auto-register the bundled controlled target (docker-compose turns this on).
+    SEED_DEMO_TARGET: bool = False
+    DEMO_TARGET_URL: str = "http://controlled-target:9100/chat"
+
     # --- n8n (optional external orchestration trigger) ---
     N8N_WEBHOOK_URL: str = ""
 

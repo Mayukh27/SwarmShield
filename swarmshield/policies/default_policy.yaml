@@ -1,7 +1,7 @@
 # SwarmShield RBAC + taint policy. Point the gateway at it with:
-#   set SWARMSHIELD_POLICY=swarmshield\policies\default_policy.yaml   (Windows CMD)
+#   export SWARMSHIELD_POLICY=swarmshield/policies/default_policy.yaml
 # Reload without restarting: POST /v1/policy/reload
-version: 2
+version: 1
 
 # Provenance labels treated as attacker-controllable (indirect prompt injection sources).
 untrusted_sources:
@@ -15,7 +15,6 @@ untrusted_sources:
 # and never those matched by denied_tools. can_message (optional) restricts which roles
 # this role may hand messages to.
 roles:
-  # --- Generic demo roles (used by swarmshield/tests/simulate_attacks.py) ---
   planner:
     allowed_tools: [delegate_task, plan, summarize]
     can_message: [planner, researcher, db_agent]
@@ -26,30 +25,6 @@ roles:
     allowed_tools: [sql_select, sql_insert, summarize]
     denied_tools: [sql_drop, sql_delete, sql_truncate, sql_execute, shell_exec]
   admin:
-    allowed_tools: ["*"]
-
-  # --- Real SwarmShield orchestrator roles (backend/app/agents) ---
-  # These are the roles the orchestrator's live gateway wiring
-  # (backend/app/agents/orchestrator.py::_run_specialist_against_vector) sends as
-  # sender_role. A specialist may only probe the specific tool/area class its
-  # name implies. tool_abuse and privilege_escalation are the two specialists
-  # whose entire job is exercising dangerous tools -- everyone else is
-  # default-denied from destructive operations even though this is a
-  # red-team system, so a prompt-injection or jailbreak payload that manages
-  # to steer itself into calling sql_drop / shell_exec still gets caught
-  # here, not just by the injection scanner.
-  prompt_injection_specialist:
-    allowed_tools: ["*"]
-    denied_tools: [sql_drop, sql_truncate, sql_delete, sql_execute, shell_exec]
-  jailbreak_specialist:
-    allowed_tools: ["*"]
-    denied_tools: [sql_drop, sql_truncate, sql_delete, sql_execute, shell_exec]
-  data_exfiltration_specialist:
-    allowed_tools: ["*"]
-    denied_tools: [sql_drop, sql_truncate, shell_exec]
-  tool_abuse_specialist:
-    allowed_tools: ["*"]
-  privilege_escalation_specialist:
     allowed_tools: ["*"]
 
 # Per-tool metadata. block_untrusted_provenance stops the confused-deputy attack: even a

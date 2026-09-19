@@ -24,20 +24,15 @@ const EVENT_PREFIX = {
   capability_unknown_discovered: "UNK",
   capability_scan_completed: "CAP",
   capability_coverage_updated: "COV",
-  security_blocked: "SEC",
-  security_circuit_breaker: "CB ",
+  security_event: "SEC",
+  security_demo_started: "SEC",
+  security_demo_done: "SEC",
+  security_demo_error: "SEC",
 };
 
 // Which event types carry real evidence worth expanding — everything else
 // (agent_action, scan_status) is already fully expressed by its message.
-const EXPANDABLE = new Set([
-  "sentinel_verdict",
-  "vulnerability_found",
-  "dna_mutation",
-  "memory_consulted",
-  "security_blocked",
-  "security_circuit_breaker",
-]);
+const EXPANDABLE = new Set(["sentinel_verdict", "vulnerability_found", "dna_mutation", "memory_consulted", "security_event"]);
 
 function EvidenceRow({ label, value }) {
   if (value === undefined || value === null || value === "") return null;
@@ -85,23 +80,42 @@ function Evidence({ event, vulnerability }) {
       </div>
     );
   }
+  if (event.event_type === "security_event") {
+    return (
+      <div className="ml-16 mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 rounded border border-critical/30 bg-void/60 px-3 py-2 font-mono text-[11px]">
+        <EvidenceRow label="Source" value={d.mode === "demo" ? "Security demo (real gateway call)" : "Scan monitor (real gateway call)"} />
+        <EvidenceRow label="HTTP status" value={d.http_status} />
+        <EvidenceRow label="Verdict" value={d.verdict} />
+        <EvidenceRow label="Violation type" value={d.violation_type} />
+        <EvidenceRow label="Risk score" value={d.risk_score} />
+        <EvidenceRow label="Rules" value={(d.rules || []).join(", ")} />
+        <EvidenceRow label="Quarantined" value={(d.quarantined_agents || []).join(", ")} />
+        <EvidenceRow label="Breaker evidence" value={d.gateway_evidence && Object.keys(d.gateway_evidence).length ? d.gateway_evidence : ""} />
+        {d.reason && (
+          <div className="col-span-full">
+            <span className="text-text-muted">Reason: </span>
+            <span className="text-text-primary">{d.reason}</span>
+          </div>
+        )}
+        {(d.evidence || []).map((x, i) => (
+          <div key={i} className="col-span-full">
+            <span className="text-text-muted">Matched {x.rule}: </span>
+            <span className="text-text-primary">{x.match}</span>
+          </div>
+        ))}
+        <div className="col-span-full">
+          <span className="text-text-muted">Message: </span>
+          <span className="text-text-primary">{d.message_preview}</span>
+        </div>
+      </div>
+    );
+  }
   if (event.event_type === "dna_mutation") {
     return (
       <div className="ml-16 mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 rounded border border-grid bg-void/60 px-3 py-2 font-mono text-[11px]">
         <EvidenceRow label="Vector" value={d.vector_id} />
         <EvidenceRow label="Generation" value={d.generation} />
         <EvidenceRow label="Mutation" value={d.mutation} />
-      </div>
-    );
-  }
-  if (event.event_type === "security_blocked" || event.event_type === "security_circuit_breaker") {
-    return (
-      <div className="ml-16 mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 rounded border border-critical/30 bg-critical-dim/40 px-3 py-2 font-mono text-[11px]">
-        <EvidenceRow label="HTTP status" value={event.event_type === "security_blocked" ? 403 : 429} />
-        <EvidenceRow label="Violation type" value={d.violation_type} />
-        <EvidenceRow label="Risk score" value={d.risk_score} />
-        <EvidenceRow label="Retry after" value={d.retry_after ? `${d.retry_after}s` : undefined} />
-        <EvidenceRow label="Receiver" value="target-under-test" />
       </div>
     );
   }
@@ -119,10 +133,8 @@ function Evidence({ event, vulnerability }) {
 
 function Line({ event, vulnerability, expanded, onToggle }) {
   const agentColor = AGENT_COLOR[event.agent_type] || "text-text-muted";
-  const isHit =
-    event.event_type === "vulnerability_found" ||
-    event.event_type === "security_blocked" ||
-    event.event_type === "security_circuit_breaker";
+  const secBlocked = event.event_type === "security_event" && event.data?.http_status >= 400;
+  const isHit = event.event_type === "vulnerability_found" || secBlocked;
   const canExpand = EXPANDABLE.has(event.event_type);
   const time = new Date(event.timestamp).toLocaleTimeString("en-US", { hour12: false });
 

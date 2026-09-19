@@ -47,13 +47,7 @@ export function useScanStream(scanId) {
     es.addEventListener("scan_status", handle("scan_status"));
     es.addEventListener("memory_consulted", handle("memory_consulted"));
     es.addEventListener("dna_mutation", handle("dna_mutation"));
-    // SwarmShield runtime gateway events (backend/app/services/swarmshield_guard.py
-    // via orchestrator.py's guard_specialist_send call). These don't create a new
-    // AttackLog row (the orchestrator `break`s before persisting one), so — unlike
-    // the events above — they don't need a refetch, just to land in the live feed
-    // for the A2A security panel / log console to pick up.
-    es.addEventListener("security_blocked", handle("security_blocked"));
-    es.addEventListener("security_circuit_breaker", handle("security_circuit_breaker"));
+    es.addEventListener("security_event", handle("security_event")); // SwarmShield gateway verdicts (monitor mode)
     es.onerror = () => {
       // Stream closes naturally when the backend finishes emitting scan_status=completed/failed
       es.close();

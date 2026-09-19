@@ -44,9 +44,8 @@ from app.models.scan import ScanRun, ScanStatus
 from app.models.target import TargetProfile
 from app.models.vulnerability import Severity, Vulnerability
 from app.schemas.attack import AgentLogEvent
-from app.services import capability_service, capability_persistence, dna_service, event_bus, memory_service, policy_service, risk, context_manager
+from app.services import capability_service, capability_persistence, dna_service, event_bus, memory_service, policy_service, risk, context_manager, shield_runtime
 from app.services.target_client import TargetClient
-from app.services.swarmshield_guard import GuardVerdict, guard_specialist_send
 
 SPECIALIST_REGISTRY = {
     "prompt_injection_specialist": (PromptInjectionSpecialist, AgentType.PROMPT_INJECTION),
@@ -152,31 +151,20 @@ async def _run_specialist_against_vector(
             agent_type=specialist_key, data={"payload": payload, "technique": attack_gen.get("technique")},
         )
 
-        # --- SwarmShield runtime security gate ---
-        # Every payload a specialist is about to hand to the target passes
-        # through the gateway first: injection scan, RBAC/taint policy, and
-        # the stateful loop circuit breaker (keyed per-scan, so a specialist
-        # stuck mutating near-duplicate payloads trips here instead of
-        # burning the rest of its attempt budget).
-        guard = await guard_specialist_send(
-            scan_id=scan_id, specialist_key=specialist_key, payload=payload,
-            target_tool_or_area=vector.get("target_tool_or_area"), generation=generation,
+        # SwarmShield runtime gateway, MONITOR mode (no-op unless SWARMSHIELD_GATEWAY_URL is set):
+        # the delegation (planner -> specialist) and the untrusted target output (target -> sentinel)
+        # are real A2A messages; the gateway's real verdict is streamed to the UI, never blocking the scan.
+        await shield_runtime.monitor(
+            scan_id, sender_id="planner", sender_role="planner", receiver_id=specialist_key, receiver_role="specialist",
+            message=f"Delegate attack vector '{vector_id}' (attempt #{generation + 1}) to {specialist_key}",
+            provenance=["internal"], label=f"delegation of '{vector_id}'",
         )
-        if not guard.allowed:
-            event_type = "security_circuit_breaker" if guard.tripped else "security_blocked"
-            await _emit(
-                scan_id, event_type,
-                f"SwarmShield {'tripped the circuit breaker for' if guard.tripped else 'blocked'} "
-                f"{specialist_key} attempt #{generation + 1} on '{vector_id}': {guard.reason}",
-                agent_type=specialist_key,
-                data={
-                    "violation_type": guard.violation_type, "risk_score": guard.risk_score,
-                    "findings": guard.findings, "retry_after": guard.retry_after,
-                },
-            )
-            break  # do not send this (or further) payload(s) to the target for this vector
-
         target_result = await client.send(payload)
+        await shield_runtime.monitor(
+            scan_id, sender_id="target", sender_role="target_system", receiver_id="sentinel", receiver_role="sentinel",
+            message=target_result.get("output") or "", provenance=["untrusted_target_output"],
+            label=f"target response for '{vector_id}' -> sentinel",
+        )
 
         sentinel_context = json.dumps({
             "agent_type": specialist_key,

@@ -788,3 +788,7 @@ SwarmShield is a security testing and research platform intended for **systems y
 Do not register or attack third-party systems without permission. The included controlled target exists specifically to provide a safe environment for demonstrations and development.
 
 ---
+
+## Runtime security demo (SwarmShield gateway)
+
+The red team now ships with a runtime gateway that inspects agent-to-agent traffic (prompt injection, RBAC/taint, loop circuit breaker) and a one-click **Run Security Demo** in the UI. See [docs/DEMO.md](docs/DEMO.md) for how to run it, what each part does, and a walkthrough.

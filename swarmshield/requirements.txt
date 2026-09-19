@@ -1,0 +1,10 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+pyyaml>=6.0
+httpx>=0.27
+langchain>=1.0
+langchain-core>=1.0
+langgraph>=1.0
+# Module 4 (attack simulations)
+rich>=13.7
