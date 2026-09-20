@@ -61,6 +61,7 @@ or error response — treat that as inconclusive, not a success.
 
 class SentinelAgent(BaseAgent):
     SYSTEM_PROMPT = SENTINEL_SYSTEM_PROMPT
+    AGENT_LABEL = "sentinel"
 
     def evaluate(self, attempt_context_json: str) -> dict:
         return self.run(attempt_context_json, as_json=True)

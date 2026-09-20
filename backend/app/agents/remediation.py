@@ -32,6 +32,7 @@ impactful change. Be specific to the evidence given, not generic advice.
 
 class RemediationAgent(BaseAgent):
     SYSTEM_PROMPT = REMEDIATION_SYSTEM_PROMPT
+    AGENT_LABEL = "remediation"
 
     def generate_patch(self, vulnerability_context_json: str) -> dict:
         return self.run(vulnerability_context_json, as_json=True)

@@ -39,3 +39,4 @@ SAFE PROOF-OF-CONCEPT CONSTRAINT:
 
 class PrivilegeEscalationSpecialist(SpecialistAgent):
     SYSTEM_PROMPT = PRIVILEGE_ESCALATION_SYSTEM_PROMPT
+    AGENT_LABEL = "privilege_escalation_specialist"

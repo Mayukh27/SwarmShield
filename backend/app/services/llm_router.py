@@ -63,8 +63,27 @@ def _grok(system: str, user: str, as_json: bool, temperature: float) -> Any:
         "response_format": {"type": "json_object"} if as_json else None,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
     })
-    response.raise_for_status(); content = response.json()["choices"][0]["message"]["content"]
+    response.raise_for_status(); body = response.json()
+    _record_grok_usage(body.get("usage"))
+    content = body["choices"][0]["message"]["content"]
     return json.loads(content) if as_json else content
+
+def _record_grok_usage(usage: dict | None) -> None:
+    """Real usage only: Grok's OpenAI-compatible response carries a
+    standard `usage: {prompt_tokens, completion_tokens, total_tokens}`
+    block when the API reports it. Records nothing if it's absent."""
+    if not usage:
+        return
+    from app.models.llm_usage import LLMProvider
+    from app.services import usage_service
+
+    usage_service.record(
+        provider=LLMProvider.GROK,
+        model=settings.GROK_MODEL,
+        prompt_tokens=usage.get("prompt_tokens"),
+        completion_tokens=usage.get("completion_tokens"),
+        total_tokens=usage.get("total_tokens"),
+    )
 
 def _cloud(system: str, user: str, as_json: bool, temperature: float) -> Any:
     if settings.LLM_PROVIDER == "grok" or (settings.GROK_ENABLED and settings.GROK_API_KEY and not settings.GEMINI_API_KEY):

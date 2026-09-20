@@ -51,6 +51,7 @@ class ScanRun(Base):
     vulnerabilities = relationship("Vulnerability", back_populates="scan", cascade="all, delete-orphan")
     memory_records = relationship("MemoryRecord", back_populates="scan", cascade="all, delete-orphan")
     attack_dna_records = relationship("AttackDNARecord", back_populates="scan", cascade="all, delete-orphan")
+    llm_usage_records = relationship("LLMUsageRecord", back_populates="scan", cascade="all, delete-orphan", passive_deletes=True)
 
     def __repr__(self) -> str:
         return f"<ScanRun {self.id} status={self.status}>"

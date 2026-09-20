@@ -43,3 +43,4 @@ SAFE PROOF-OF-CONCEPT CONSTRAINT:
 
 class DataExfiltrationSpecialist(SpecialistAgent):
     SYSTEM_PROMPT = DATA_EXFILTRATION_SYSTEM_PROMPT
+    AGENT_LABEL = "data_exfiltration_specialist"

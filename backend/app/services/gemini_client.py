@@ -72,6 +72,8 @@ def generate_cloud(
         config=config,
     )
 
+    _record_gemini_usage(response)
+
     text = response.text or ""
 
     if as_json:
@@ -83,6 +85,26 @@ def generate_cloud(
             return json.loads(cleaned)
 
     return text
+
+
+def _record_gemini_usage(response: Any) -> None:
+    """Real usage only: google-genai's response carries `usage_metadata`
+    (prompt_token_count/candidates_token_count/total_token_count) when the
+    API reports it. If it's missing (older SDK, or the API genuinely
+    didn't return it), this records nothing rather than guessing."""
+    usage = getattr(response, "usage_metadata", None)
+    if usage is None:
+        return
+    from app.models.llm_usage import LLMProvider
+    from app.services import usage_service
+
+    usage_service.record(
+        provider=LLMProvider.GEMINI,
+        model=settings.GEMINI_MODEL,
+        prompt_tokens=getattr(usage, "prompt_token_count", None),
+        completion_tokens=getattr(usage, "candidates_token_count", None),
+        total_tokens=getattr(usage, "total_token_count", None),
+    )
 
 
 def generate(system_instruction: str, user_content: str, as_json: bool = False, temperature: float = 0.7) -> Any:

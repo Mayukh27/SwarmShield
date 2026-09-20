@@ -90,6 +90,7 @@ and general behavior, since no tool-specific attack surface is known yet.
 
 class PlannerAgent(BaseAgent):
     SYSTEM_PROMPT = PLANNER_SYSTEM_PROMPT
+    AGENT_LABEL = "planner"
 
     def plan(self, target_description_json: str) -> dict:
         return self.run(target_description_json, as_json=True)

@@ -1,8 +1,9 @@
 import asyncio
 import json
 import uuid
+from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
@@ -11,8 +12,8 @@ from app.models.scan import ScanRun
 from app.models.target import TargetProfile
 from app.models.attack import AttackLog
 from app.schemas.attack import AttackLogOut
-from app.schemas.scan import ScanCreate, ScanOut
-from app.services import event_bus
+from app.schemas.scan import ScanCreate, ScanOut, ScanUsageOut
+from app.services import event_bus, log_export, usage_service
 from app.services.pdf_service import make_text_pdf
 from app.services.scan_manager import launch_scan
 
@@ -65,6 +66,38 @@ def list_scans(target_id: uuid.UUID | None = None, db: Session = Depends(get_db)
     if target_id:
         q = q.filter(ScanRun.target_id == target_id)
     return q.order_by(ScanRun.started_at.desc()).all()
+
+
+@router.get("/{scan_id}/usage", response_model=ScanUsageOut)
+def get_scan_usage(scan_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Real LLM token usage recorded for this scan (from provider-reported counters)."""
+    if not usage_service.scan_exists(db, scan_id):
+        raise HTTPException(status_code=404, detail="Scan not found")
+    return usage_service.get_scan_usage(db, scan_id)
+
+
+@router.get("/{scan_id}/export")
+def export_scan_logs(
+    scan_id: uuid.UUID,
+    format: Literal["json", "txt"] = Query(default="json"),
+    include_a2a: bool = Query(default=True, description="Include a best-effort gateway (A2A) snapshot"),
+    db: Session = Depends(get_db),
+):
+    """Downloadable battle log for one scan (allow-listed fields, secrets redacted)."""
+    snapshot = log_export.fetch_gateway_snapshot() if include_a2a else None
+    export = log_export.build_scan_export(db, scan_id, gateway_snapshot=snapshot)
+    if export is None:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    if format == "txt":
+        body, media = log_export.to_text(export), "text/plain; charset=utf-8"
+    else:
+        body, media = log_export.to_json(export), "application/json"
+    return Response(
+        content=body,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="swarmshield-battle-log-{scan_id}.{format}"',
+                 "Cache-Control": "no-store"},
+    )
 
 
 @router.get("/{scan_id}/report.pdf")

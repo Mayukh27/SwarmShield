@@ -28,6 +28,10 @@ export const api = {
     }),
   getScan: (id) => request(`/scans/${id}`),
   getAttackLogs: (scanId) => request(`/scans/${scanId}/attack-logs`),
+  // Real LLM token usage recorded for a scan (provider-reported counters, never estimated)
+  getScanUsage: (scanId) => request(`/scans/${scanId}/usage`),
+  // Downloadable battle log (allow-listed fields, secrets redacted server-side). format: "json" | "txt"
+  scanExportUrl: (scanId, format = "json") => `${BASE}/scans/${scanId}/export?format=${format}`,
   scanReportPdfUrl: (scanId) => `${BASE}/scans/${scanId}/report.pdf`,
 
   // Vulnerabilities

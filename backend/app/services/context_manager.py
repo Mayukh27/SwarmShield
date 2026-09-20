@@ -20,6 +20,25 @@ def get_context() -> dict | None:
     return _context.get()
 
 
+@contextmanager
+def agent_scope(agent_type: str):
+    """Temporarily label the active scan context with the agent making LLM calls.
+
+    Used only so real token usage can be attributed to an agent. The context
+    dict is mutated in place (NOT copied) because it also carries the shared
+    per-scan call counters (rag_calls/local_calls/cloud_calls). No-op outside
+    an active scan context.
+    """
+    ctx = _context.get()
+    if ctx is None:
+        yield
+        return
+    previous = ctx.get("agent_type")
+    ctx["agent_type"] = agent_type
+    try: yield
+    finally: ctx["agent_type"] = previous
+
+
 def activate(db: Session, scan_id, *, agent_type: str = "swarm"):
     """Set context for the synchronous scan worker; returns a reset token."""
     return _context.set({"db": db, "scan_id": scan_id, "agent_type": agent_type})
