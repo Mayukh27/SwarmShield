@@ -1,10 +1,19 @@
 # SwarmShield
 
-### Autonomous AI Red-Team & Security Validation Platform
+### Autonomous AI Red-Team & Runtime Security Platform
 
-SwarmShield is an autonomous, multi-agent security testing platform for **authorized AI systems and agentic applications**. It discovers an AI target's attack surface, plans and executes adversarial tests, evaluates evidence, learns from previous attempts, builds attack intelligence, generates remediation, and can revalidate whether a vulnerability was actually fixed.
+SwarmShield is an autonomous, multi-agent security testing platform for **authorized AI systems and agentic applications**. It discovers an AI target's attack surface, plans and executes adversarial tests, evaluates evidence, learns from previous attempts, builds attack intelligence, generates remediation, and can revalidate whether a vulnerability was actually fixed. A runtime gateway then protects agent-to-agent traffic against the same class of attacks while the agents are running.
 
-> **Authorized testing only.** SwarmShield requires an explicit authorization attestation before a target can be scanned. Read-only operation is the safe default, while live patch application, branch writes, and pull-request creation are independently permission-gated.
+---
+
+## Two Halves, One Platform
+
+| Half | Question it answers | Where it lives |
+|---|---|---|
+| **Autonomous Red Team** | "Where is my AI system vulnerable?" | Planner Agent, specialist agents (prompt injection, jailbreak, tool abuse, data exfiltration, privilege escalation), and the Sentinel Agent — attack planning and execution, vulnerability confirmation, remediation, and patch revalidation |
+| **Runtime Security** | "Can I stop those attacks while the agents are running?" | The SwarmShield A2A gateway (`swarmshield/gateway.py`) — agent-to-agent transfer inspection, prompt-injection detection, RBAC / tool authorization, human review and flagging, and a circuit breaker for runaway delegation loops |
+
+The two halves share nothing in secret: the red team finds weaknesses by attacking a target, and the gateway sits between agents on every hop and enforces detection against that same class of attack in real time. See [Runtime Security Gateway](#runtime-security-gateway) below for the gateway architecture, verified attack demonstrations, and framework integrations.
 
 ---
 
@@ -762,6 +771,26 @@ cd frontend
 npm run build
 ```
 
+Runtime gateway and framework-integration tests (no LLM, no API keys required) are located under:
+
+```text
+swarmshield/tests/
+```
+
+Run them with:
+
+```bash
+pytest swarmshield/tests -v
+```
+
+This currently verifies:
+
+```text
+27 passed
+```
+
+covering the gateway's own request pipeline, the `GatewayClient` SDK, and the LangChain and LangGraph adapters. See [Integration Test Verification](#integration-test-verification) for details.
+
 ---
 
 ## Design Principles
@@ -789,7 +818,108 @@ Do not register or attack third-party systems without permission. The included c
 
 ---
 
-## Runtime security demo (SwarmShield gateway)
+## Runtime Security Gateway
 
-The red team now ships with a runtime gateway that inspects agent-to-agent traffic (prompt injection, RBAC/taint, loop circuit breaker) and a one-click **Run Security Demo** in the UI. See [docs/DEMO.md](docs/DEMO.md) for how to run it, what each part does, and a walkthrough.
-LangChain and LangGraph adapters that route agent/tool execution through the same gateway: [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
+The red team finds where an AI system is vulnerable. The **SwarmShield gateway** (`swarmshield/gateway.py`) is the runtime half: a central interception server that every piece of agent-to-agent (A2A) traffic is routed through, so the same classes of attack the red team confirms can also be stopped live. The dashboard exposes this as an **A2A Security** page plus a one-click **Run Security Demo**, and there's a scripted, terminal-runnable version of the same demo described below.
+
+### Architecture
+
+```text
+Agent A
+   |
+   | A2A transfer  (POST /a2a/transfer)
+   v
+SwarmShield Gateway
+   |
+   +--> Injection Detection      (prompt-injection / jailbreak scan)
+   +--> Policy / RBAC            (tool authorization, taint tracking)
+   +--> Circuit Breaker          (recursion depth, velocity, ping-pong loops)
+   |
+   +--> ALLOW                (200, clean)
+   +--> FLAG                 (200, requires_human_review)
+   +--> BLOCK (403)          (injection / RBAC / taint / quarantined sender)
+   +--> CIRCUIT BREAK (429)  (loop tripped)
+   |
+   v
+Agent B
+```
+
+Per the gateway's own pipeline, every `POST /a2a/transfer` runs: quarantine check → tripped-breaker check → injection scan → RBAC / taint policy → circuit breaker observation → verdict. State is in-memory and single-process. A `/ws/telemetry` WebSocket streams every decision to the dashboard in real time.
+
+During a red-team scan, delegations and target output are sent to the gateway in **monitor mode** (`backend/app/services/shield_runtime.py`): real verdicts are computed and shown, but the scan itself is never blocked, since the red team is authorized to attack. When a patch is applied and revalidated with `APPLY_PATCH_MODE=both`, the target is routed through the gateway so the same attacks are blocked for real.
+
+### Runtime Attack Demonstrations
+
+Two verified, executable attack simulations ship with the repository and run against the real gateway app (`swarmshield.gateway.app`) — nothing is pre-scripted to merely look blocked:
+
+```bash
+python -m swarmshield.tests.simulate_attacks
+```
+
+**Scenario A — Indirect Prompt Injection.** A "researcher" agent hands off content it fetched from the web to a "db_agent," requesting a routine `sql_select` summarization call. Hidden inside the untrusted web content is an injected instruction attempting to trigger an unauthorized, destructive database operation.
+
+- Expected and verified result: **HTTP 403**
+- SwarmShield intercepts the transfer at the gateway before the receiving agent ever sees the malicious payload.
+
+This is a controlled, local security demonstration against the repository's own controlled target and gateway — not a real attack against an external system.
+
+**Scenario B — Recursive Agent-to-Agent Loop.** Agent A and Agent B repeatedly re-delegate the same task back and forth with no forward progress.
+
+- Expected and verified result: **HTTP 429**
+- The circuit breaker detects the recursive delegation pattern and stops the loop.
+
+Verified demonstration output:
+
+```text
+hop 1 -> ALLOW
+hop 2 -> ALLOW
+hop 3 -> ALLOW
+hop 4 -> ALLOW
+hop 5 -> ALLOW
+hop 6 -> HTTP 429
+```
+
+### LangChain Integration
+
+`swarmshield/integrations/langchain.py` is a thin adapter: it contains no detection or policy logic of its own. Every inbound message, proposed tool call, and tool/retrieval output is sent to the SwarmShield gateway over `POST /a2a/transfer`, and the adapter only translates the gateway's answer into LangChain's own control flow — the same gateway, policy file, and circuit breaker used everywhere else in the project.
+
+- `before_agent` inspects the inbound message before the LLM sees it.
+- `wrap_tool_call` (LangChain's around-tool hook) inspects every proposed tool call against RBAC and taint policy, using the calling agent's `role`.
+- For tools listed in `untrusted_output_tools` (web search / retrieval by default), the tool's **output** is scanned before the model reads it.
+- A gateway `403` halts the agent, or — for a tool call — returns an error `ToolMessage` so the tool never actually runs.
+- A gateway `429` (circuit breaker) is treated the same way as a `403`.
+- `fail_mode="closed"` (the default) blocks when the gateway is unreachable; `fail_mode="open"` lets traffic through uninspected.
+
+LangChain is an integration/adapter layer on top of the gateway, not the runtime gateway itself. Verified against **LangChain 1.4.2**.
+
+### LangGraph Integration
+
+`swarmshield/integrations/langgraph.py` adds a SwarmShield gate to a `StateGraph`, in front of whichever node you designate as protected (`add_swarmshield_gate(builder, protected_node=...)`), running the same gateway security decision before that node executes.
+
+- A `200 flag` (`requires_human_review`) verdict pauses the graph with `interrupt()` for human approve/reject, rather than continuing silently.
+- A `403` routes to a quarantine node and is final by default; specific violation types (e.g. `prompt_injection`) can be opted into being human-overridable via `overridable_violations`.
+- A `429` (circuit breaker) also routes to quarantine and is never overridable.
+- RBAC violations hard-stop by default.
+- Hop count is incremented on every pass through the gate, so cyclic graphs get recursion-depth protection against recursive graph/delegation loops.
+- Works with both synchronous `invoke` and asynchronous `ainvoke`.
+
+LangGraph is likewise an integration/adapter layer, not part of the gateway itself. Verified against **LangGraph 1.2.11**.
+
+### Integration Test Verification
+
+```bash
+pytest swarmshield/tests -v
+```
+
+Verified result:
+
+```text
+27 passed
+```
+
+These tests start the real gateway in-process and exercise it directly, plus real `create_agent` (LangChain) and `StateGraph` (LangGraph) workflows running against it with a scripted offline chat model — no LLM calls or API keys required.
+
+### Further reading
+
+- [docs/DEMO.md](docs/DEMO.md) — how to run the full runtime demo, what each moving part does, and a browser walkthrough.
+- [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) — LangChain / LangGraph adapter reference, including installation extras and configuration.
