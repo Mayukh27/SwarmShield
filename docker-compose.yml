@@ -36,6 +36,25 @@ services:
       timeout: 3s
       retries: 10
 
+  # Standalone hackathon-demo target: multiple simulated agents (Planner, Research, DB, Tool,
+  # Agent A/B) exercising the SAME SwarmShield gateway. Does not replace controlled-target.
+  demo-target:
+    build:
+      context: ./demo_target
+      dockerfile: Dockerfile
+    depends_on:
+      swarmshield-gateway:
+        condition: service_healthy
+    environment:
+      SWARMSHIELD_GATEWAY_URL: http://swarmshield-gateway:8100
+      SWARMSHIELD_API_KEY: ${SWARMSHIELD_API_KEY:-}
+    ports: ["9200:9200"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:9200/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   controlled-target:
     build: ./controlled_target
     depends_on:

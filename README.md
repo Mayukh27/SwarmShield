@@ -22,49 +22,41 @@ The two halves share nothing in secret: the red team finds weaknesses by attacki
 SwarmShield treats an AI application as a security boundary rather than simply testing a conventional HTTP endpoint.
 
 ```text
-                         ┌──────────────────────────┐
-                         │      Target Registry      │
-                         │ URL + Auth + Tools +     │
-                         │ Policy + Access Controls │
-                         └────────────┬─────────────┘
-                                      │
-                                      ▼
-                         ┌──────────────────────────┐
-                         │   Capability Discovery    │
-                         │   Attack Surface Mapping  │
-                         └────────────┬─────────────┘
-                                      │
-                                      ▼
-                         ┌──────────────────────────┐
-                         │      Planner Agent        │
-                         │ Prioritizes attack paths  │
-                         └────────────┬─────────────┘
-                                      │
-                    ┌─────────────────┼─────────────────┐
-                    ▼                 ▼                 ▼
-              Prompt Injection   Jailbreak          Tool Abuse
-              Specialist         Specialist         Specialist
-                    │                 │                 │
-                    └─────────────────┼─────────────────┘
-                                      ▼
-                           ┌─────────────────────┐
-                           │    Target System    │
-                           └──────────┬──────────┘
-                                      ▼
-                           ┌─────────────────────┐
-                           │   Sentinel Agent    │
-                           │ Evidence + Verdict  │
-                           └──────────┬──────────┘
-                                      ▼
-                         ┌──────────────────────────┐
-                         │ Memory + Attack DNA +    │
-                         │ Attack Graph + Risk      │
-                         └────────────┬─────────────┘
-                                      ▼
-                         ┌──────────────────────────┐
-                         │ Remediation + Auto PR    │
-                         │ + Revalidation           │
-                         └──────────────────────────┘
+                         SWARMSHIELD
+                              │
+              ┌───────────────┴────────────────┐
+              │                                │
+              ▼                                ▼
+     AUTONOMOUS RED TEAM                RUNTIME SECURITY
+              │                         A2A GATEWAY
+              │                                │
+     ┌────────┴────────┐              ┌────────┴─────────┐
+     │                 │              │                  │
+ Discovery          Attack          Inspect            Enforce
+     │              Planning           │                  │
+     ▼                 ▼              ▼                  ▼
+ Attack Surface → Adversarial     Injection           RBAC
+ Discovery         Testing        Detection           Policies
+     │                 │              │                  │
+     ▼                 ▼              ▼                  ▼
+ Evidence         Findings        Loop Detection     Quarantine
+     │                 │              │                  │
+     ▼                 ▼              ▼                  ▼
+ Remediation      Revalidation    Protected A2A      Runtime
+     │                                Traffic         Verdicts
+     │                                   │
+     └──────────────┐          ┌────────┘
+                    ▼          ▼
+                 ┌────────────────────┐
+                 │   AI APPLICATION   │
+                 │                    │
+                 │ Planner Agent      │
+                 │ Research Agent     │
+                 │ Database Agent     │
+                 │ Tool Agent         │
+                 │                    │
+                 │ A ↔ B Delegation   │
+                 └────────────────────┘
 ```
 
 ---

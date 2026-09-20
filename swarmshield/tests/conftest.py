@@ -22,6 +22,11 @@ def _free_port() -> int:
 
 @pytest.fixture(scope="session")
 def gateway_url():
+    # Point the suite at an already-running gateway (e.g. the docker-compose one) instead of starting one.
+    external = os.environ.get("SWARMSHIELD_TEST_GATEWAY_URL")
+    if external:
+        yield external.rstrip("/")
+        return
     uvicorn = pytest.importorskip("uvicorn")
     os.environ["SWARMSHIELD_POLICY"] = str(POLICY)
     os.environ.pop("SWARMSHIELD_API_KEY", None)
