@@ -13,6 +13,7 @@ dependencies = ["fastapi>=0.115", "uvicorn[standard]>=0.30", "pydantic>=2.7", "p
 langchain = ["langchain>=1.0", "langchain-core>=1.0"]
 langgraph = ["langgraph>=1.0", "langchain-core>=1.0"]
 demo = ["rich>=13.7"]
+test = ["pytest>=8", "pytest-asyncio>=0.23"]
 
 [tool.setuptools.packages.find]
 include = ["swarmshield*"]

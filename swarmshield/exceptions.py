@@ -25,6 +25,14 @@ class SwarmShieldError(Exception):
     def violation_type(self) -> Optional[str]:
         return self.detail.get("violation_type")
 
+    @property
+    def quarantined_agents(self) -> list[str]:
+        return list(self.detail.get("quarantined_agents", []))
+
+    @property
+    def evidence(self) -> dict[str, Any]:
+        return dict(self.detail.get("evidence", {}))
+
 
 class SwarmShieldSecurityException(SwarmShieldError):
     """Gateway answered 403: injection, RBAC/taint violation or quarantined sender."""

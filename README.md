@@ -792,3 +792,4 @@ Do not register or attack third-party systems without permission. The included c
 ## Runtime security demo (SwarmShield gateway)
 
 The red team now ships with a runtime gateway that inspects agent-to-agent traffic (prompt injection, RBAC/taint, loop circuit breaker) and a one-click **Run Security Demo** in the UI. See [docs/DEMO.md](docs/DEMO.md) for how to run it, what each part does, and a walkthrough.
+LangChain and LangGraph adapters that route agent/tool execution through the same gateway: [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).

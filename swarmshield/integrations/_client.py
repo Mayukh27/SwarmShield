@@ -39,6 +39,8 @@ class GatewayVerdict:
     findings: tuple[dict[str, Any], ...] = ()
     requires_human_review: bool = False
     message_id: str = ""
+    violation_type: Optional[str] = None
+    quarantined_agents: tuple[str, ...] = ()
     degraded: bool = False  # True when the gateway was offline and we failed open
     raw: Mapping[str, Any] = field(default_factory=dict)
 
@@ -84,7 +86,7 @@ class GatewayClient:
         timeout: float = 5.0,
         fail_mode: FailMode = "closed",
     ) -> None:
-        self.base_url = (base_url or os.getenv("SWARMSHIELD_URL", "http://localhost:8000")).rstrip("/")
+        self.base_url = (base_url or os.getenv("SWARMSHIELD_URL", "http://localhost:8100")).rstrip("/")
         self._api_key = api_key or os.getenv("SWARMSHIELD_API_KEY")
         self._timeout = timeout
         self.fail_mode: FailMode = fail_mode
@@ -115,6 +117,8 @@ class GatewayClient:
                 findings=tuple(body.get("findings", [])),
                 requires_human_review=bool(body.get("requires_human_review", False)),
                 message_id=str(body.get("message_id", "")),
+                violation_type=body.get("violation_type"),
+                quarantined_agents=tuple(body.get("quarantined_agents", [])),
                 raw=body,
             )
         if resp.status_code == 403:

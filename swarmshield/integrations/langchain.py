@@ -34,9 +34,15 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional, Sequence
 
-from langchain.agents.middleware import AgentMiddleware, AgentState, hook_config
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
-from langgraph.types import Command
+try:  # optional dependency: importing swarmshield or the gateway never needs LangChain
+    from langchain.agents.middleware import AgentMiddleware, AgentState, hook_config
+    from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
+    from langgraph.types import Command
+except ImportError as exc:  # pragma: no cover - exercised in tests via a blocked import
+    raise ImportError(
+        "swarmshield.integrations.langchain requires LangChain >= 1.0. "
+        'Install it with: pip install "swarmshield[langchain]"'
+    ) from exc
 
 from swarmshield.exceptions import SwarmShieldError
 from swarmshield.integrations._client import FailMode, GatewayClient
@@ -61,6 +67,17 @@ def _text(content: Any) -> str:
         parts = [b if isinstance(b, str) else str(b.get("text", "")) for b in content if isinstance(b, (str, dict))]
         return "\n".join(p for p in parts if p)
     return str(content)
+
+
+def _thread_id() -> Optional[str]:
+    """LangGraph ``configurable.thread_id`` of the current run, if we are inside one."""
+    try:
+        from langgraph.config import get_config
+
+        thread = (get_config().get("configurable") or {}).get("thread_id")
+        return str(thread) if thread else None
+    except Exception:  # noqa: BLE001 - outside a runnable context / older langgraph
+        return None
 
 
 class SwarmShieldMiddleware(AgentMiddleware):
@@ -102,12 +119,23 @@ class SwarmShieldMiddleware(AgentMiddleware):
         return None
 
     def _conversation_id(self, state: AgentState) -> str:
-        """Stable id per conversation: explicit envelope id, else a hash of the first message."""
+        """Conversation id the gateway's circuit breaker groups by.
+
+        Priority: explicit envelope id > LangGraph ``thread_id`` (a real multi-turn conversation) >
+        id of the latest human message (unique per agent run, so separate runs of the same prompt are
+        never mistaken for a loop) > hash of the first message.
+        """
         messages = state.get("messages", [])
         for msg in reversed(messages):
             cid = self._envelope(msg).get("conversation_id")
             if cid:
                 return str(cid)
+        thread_id = _thread_id()
+        if thread_id:
+            return f"lc-{thread_id}"
+        human = self._latest_human(state)
+        if human is not None and getattr(human, "id", None):
+            return f"lc-run-{human.id}"
         seed = f"{self.agent_id}:{_text(messages[0].content) if messages else ''}"
         return "lc-" + hashlib.sha1(seed.encode("utf-8")).hexdigest()[:12]
 
