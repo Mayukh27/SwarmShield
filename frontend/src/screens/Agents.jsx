@@ -6,11 +6,14 @@ import BattlePlanPanel from "../components/BattlePlanPanel";
 import MemoryPanel from "../components/MemoryPanel";
 import AttackDnaPanel from "../components/AttackDnaPanel";
 import AgentDetailPanel from "../components/AgentDetailPanel";
+import SecurityPanel, { ShieldBadge, useShieldStore } from "../components/SecurityPanel";
 
 export default function Agents({ scanInFlight }) {
   const events = useScanStore((s) => s.events);
   const activeScan = useScanStore((s) => s.activeScan);
   const [selectedAgent, setSelectedAgent] = useState(null);
+  const shieldAgents = useShieldStore((s) => s.agents);
+  const shieldStatus = useMemo(() => Object.fromEntries(shieldAgents.map((a) => [a.agent_id, a.status])), [shieldAgents]);
 
   const agents = useMemo(
     () => deriveAgentStates(events, scanInFlight, activeScan?.status),
@@ -47,7 +50,10 @@ export default function Agents({ scanInFlight }) {
             >
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-sm font-medium text-text-primary">{agent.name}</p>
+                  <p className="text-sm font-medium text-text-primary">
+                    {agent.name}
+                    <ShieldBadge status={shieldStatus[agent.type]} />
+                  </p>
                   <p className="mt-1 text-[9px] tracking-widest text-white/25">{agent.group}</p>
                 </div>
                 <span
@@ -66,6 +72,11 @@ export default function Agents({ scanInFlight }) {
             </button>
           ))}
         </div>
+      </section>
+
+      {/* A2A RUNTIME SECURITY: SwarmShield gateway watching the swarm + one-click security demo */}
+      <section className="mt-6">
+        <SecurityPanel />
       </section>
 
       {/* PLAN + LIVE LOG */}

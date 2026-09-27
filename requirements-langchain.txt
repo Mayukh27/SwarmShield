@@ -1,0 +1,12 @@
+# Optional extras for swarmshield/integrations/langchain.py and langgraph.py.
+# Not required to run the core SwarmShield app or the gateway itself -- only
+# needed if you're wiring SwarmShield into a LangChain/LangGraph agent.
+#
+# Install with:  pip install -r requirements-langchain.txt
+#
+# Versions below are the ones the integration files in this build were
+# actually tested against (see swarmshield/tests/simulate_attacks.py and the
+# integration test run in the project handoff notes).
+langchain==1.4.2
+langchain-core==1.6.3
+langgraph==1.2.11

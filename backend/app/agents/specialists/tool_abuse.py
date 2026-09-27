@@ -48,3 +48,4 @@ SAFE PROOF-OF-CONCEPT CONSTRAINT:
 
 class ToolAbuseSpecialist(SpecialistAgent):
     SYSTEM_PROMPT = TOOL_ABUSE_SYSTEM_PROMPT
+    AGENT_LABEL = "tool_abuse_specialist"

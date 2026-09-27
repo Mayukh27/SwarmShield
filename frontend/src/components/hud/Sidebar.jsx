@@ -1,6 +1,7 @@
 const NAV_ITEMS = [
   { id: "dashboard", label: "Dashboard", icon: "⌂" },
   { id: "agents", label: "AI Agents", icon: "◈" },
+  { id: "security", label: "A2A Security", icon: "⛨" },
   { id: "targets", label: "Targets", icon: "◎" },
   { id: "vulnerabilities", label: "Vulnerabilities", icon: "△" },
   { id: "patches", label: "Patch Center", icon: "◇" },

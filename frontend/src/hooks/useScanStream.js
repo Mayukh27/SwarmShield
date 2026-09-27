@@ -47,6 +47,7 @@ export function useScanStream(scanId) {
     es.addEventListener("scan_status", handle("scan_status"));
     es.addEventListener("memory_consulted", handle("memory_consulted"));
     es.addEventListener("dna_mutation", handle("dna_mutation"));
+    es.addEventListener("security_event", handle("security_event")); // SwarmShield gateway verdicts (monitor mode)
     es.onerror = () => {
       // Stream closes naturally when the backend finishes emitting scan_status=completed/failed
       es.close();

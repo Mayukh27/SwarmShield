@@ -47,3 +47,4 @@ SAFE PROOF-OF-CONCEPT CONSTRAINT (critical):
 
 class JailbreakSpecialist(SpecialistAgent):
     SYSTEM_PROMPT = JAILBREAK_SYSTEM_PROMPT
+    AGENT_LABEL = "jailbreak_specialist"

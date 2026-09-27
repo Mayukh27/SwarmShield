@@ -51,3 +51,4 @@ CONSTRAINTS:
 
 class PromptInjectionSpecialist(SpecialistAgent):
     SYSTEM_PROMPT = PROMPT_INJECTION_SYSTEM_PROMPT
+    AGENT_LABEL = "prompt_injection_specialist"

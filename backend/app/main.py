@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import capabilities, graph, intelligence, memory_dna, patches, remediation_pr, revalidation, scans, targets, vulnerabilities
+from app.api.routes import capabilities, graph, intelligence, memory_dna, patches, remediation_pr, revalidation, scans, shield, targets, vulnerabilities
 from app.core.config import settings
 from app.db.init_db import init_db
 
@@ -11,6 +11,10 @@ from app.db.init_db import init_db
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()  # hackathon-simple: create tables if they don't exist yet
+    if settings.SEED_DEMO_TARGET:
+        from app.db.seed_demo import seed_demo_target
+
+        seed_demo_target()  # one-click demo: bundled controlled target is pre-registered
     yield
 
 
@@ -34,6 +38,7 @@ app.include_router(revalidation.router, prefix=settings.API_V1_PREFIX)
 app.include_router(remediation_pr.router, prefix=settings.API_V1_PREFIX)
 app.include_router(intelligence.router, prefix=settings.API_V1_PREFIX)
 app.include_router(capabilities.router, prefix=settings.API_V1_PREFIX)
+app.include_router(shield.router, prefix=settings.API_V1_PREFIX)
 
 
 @app.get("/health")

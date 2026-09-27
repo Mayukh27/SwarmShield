@@ -28,13 +28,19 @@ Run:
 """
 from __future__ import annotations
 
+import contextvars
+import json
 import logging
 import os
 import re
+import uuid
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+
+from shield_hook import BLOCK_MESSAGE, SHIELD  # optional SwarmShield gateway hook (off by default)
 
 logging.basicConfig(
     filename="swarmshield_target_audit.log",
@@ -54,6 +60,60 @@ SAFE_MODE = True  # tools below MUST stay mocked/local while this is True
 # /revalidation replay the exact same winning payload and get a genuinely
 # different (fixed) result, rather than a scripted "now it's fixed" flag.
 PATCHED = False
+
+# ---------------------------------------------------------------------------
+# 0. Optional SwarmShield gateway integration (see shield_hook.py)
+# ---------------------------------------------------------------------------
+# When the shield is active, three choke points are routed through the SwarmShield gateway:
+#   (1) the user message, (2) each retrieved RAG document, (3) every tool call before it runs.
+# It is independent of PATCHED, so a before/after demo can attribute a block to the gateway.
+@dataclass
+class ShieldContext:
+    conversation_id: str = field(default_factory=lambda: f"req-{uuid.uuid4().hex[:12]}")
+    tainted: bool = False  # something in this request looked suspicious -> tools become untrusted
+    events: list[dict[str, Any]] = field(default_factory=list)
+
+
+_SHIELD_CTX: contextvars.ContextVar[Optional[ShieldContext]] = contextvars.ContextVar("shield_ctx", default=None)
+
+
+def _record(ctx: ShieldContext, stage: str, subject: str, decision: Any) -> None:
+    ctx.events.append(
+        {
+            "stage": stage,
+            "subject": subject,
+            "action": decision.action,
+            "risk_score": decision.risk_score,
+            "violation_type": decision.violation_type,
+            "reason": decision.reason,
+            "rules": decision.rules,
+        }
+    )
+
+
+def _gate_tool(name: str, args: dict[str, Any], caller_role: str) -> Optional[str]:
+    """Returns a neutral refusal string if the gateway blocks this tool call, else None."""
+    ctx = _SHIELD_CTX.get()
+    if not SHIELD.active or ctx is None:
+        return None
+    decision = SHIELD.inspect(
+        message=json.dumps(args),
+        sender_id="support_assistant",
+        sender_role="support_assistant",
+        receiver_id=f"tool:{name}",
+        # The role whose privileges the tool runs with: verified admin sessions vs everyone else.
+        receiver_role="admin_assistant" if caller_role == "admin" else "support_assistant",
+        target_tool=name,
+        tool_args=args,
+        provenance=["user"] + (["tainted_context"] if ctx.tainted else []),
+        conversation_id=ctx.conversation_id,
+    )
+    _record(ctx, "tool_call", name, decision)
+    if decision.blocks:
+        audit.info(f"SHIELD blocked tool {name}: {decision.reason}")
+        return BLOCK_MESSAGE
+    return None
+
 
 # ---------------------------------------------------------------------------
 # 1. RAG corpus
@@ -149,6 +209,9 @@ def tool_read_file(path: str, caller_role: str = "user") -> str:
     # VULN 4 / tool abuse: no check that caller_role is authorized to read
     # this path. PATCHED: the remediation's permission_scope fix -- refuse
     # confidential paths for non-admin callers.
+    denied = _gate_tool("read_file", {"path": path}, caller_role)
+    if denied:
+        return denied
     audit.info(f"TOOL read_file(path={path!r}, caller_role={caller_role!r}, patched={PATCHED})")
     if PATCHED and path in CONFIDENTIAL_PATHS and caller_role != "admin":
         return "<permission denied: caller_role not authorized for this path>"
@@ -158,6 +221,9 @@ def tool_read_file(path: str, caller_role: str = "user") -> str:
 def tool_send_email(to: str, body: str) -> str:
     # SAFE_MODE: never actually sends anything, only logs + returns a mock
     # confirmation, so this is safe to "succeed" against during testing.
+    denied = _gate_tool("send_email", {"to": to, "body": body}, "user")
+    if denied:
+        return denied
     audit.info(f"TOOL send_email(to={to!r}, body={body[:200]!r})")
     return f"mock-email-queued-to:{to}"
 
@@ -166,6 +232,9 @@ def tool_execute_admin_action(action: str, caller_role: str = "user") -> str:
     # VULN 3 / privilege escalation: this tool is exposed to the assistant
     # with no role check at all -- any session can trigger an "admin"
     # action purely by asking the model to call it. PATCHED: gated by role.
+    denied = _gate_tool("execute_admin_action", {"action": action}, caller_role)
+    if denied:
+        return denied
     audit.info(f"TOOL execute_admin_action(action={action!r}, caller_role={caller_role!r}, patched={PATCHED})")
     if PATCHED and caller_role != "admin":
         return "<permission denied: admin action requires caller_role=admin>"
@@ -321,18 +390,74 @@ class ChatResponse(BaseModel):
     output: str
     retrieved_docs: list[str]
     tool_calls: list[dict[str, Any]]
+    shield: Optional[dict[str, Any]] = None  # only present when the SwarmShield gateway is active
 
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
-    docs = retrieve(request.input)
-    raw_output = call_llm(SYSTEM_PROMPT, docs, request.input, request.caller_role)
-    output, tool_calls = parse_and_run_tool_calls(raw_output)
-    return ChatResponse(
-        output=output,
-        retrieved_docs=[d["id"] for d in docs],
-        tool_calls=tool_calls,
-    )
+    if not SHIELD.active:
+        docs = retrieve(request.input)
+        raw_output = call_llm(SYSTEM_PROMPT, docs, request.input, request.caller_role)
+        output, tool_calls = parse_and_run_tool_calls(raw_output)
+        return ChatResponse(output=output, retrieved_docs=[d["id"] for d in docs], tool_calls=tool_calls)
+
+    ctx = ShieldContext()
+    token = _SHIELD_CTX.set(ctx)
+    try:
+        # (1) direct prompt injection: inspect the user's message before anything else runs
+        decision = SHIELD.inspect(
+            message=request.input,
+            sender_id="user:anonymous",
+            sender_role="end_user",
+            receiver_id="support_assistant",
+            receiver_role="support_assistant",
+            provenance=["user"],
+            conversation_id=ctx.conversation_id,
+        )
+        _record(ctx, "user_input", "user message", decision)
+        if decision.blocks:
+            return ChatResponse(
+                output=f"{BLOCK_MESSAGE} This request was blocked by a security policy.",
+                retrieved_docs=[],
+                tool_calls=[],
+                shield=_shield_summary(ctx, blocked=True),
+            )
+        ctx.tainted = ctx.tainted or decision.suspicious
+
+        # (2) indirect prompt injection: every retrieved document is untrusted until scanned
+        safe_docs: list[dict[str, str]] = []
+        for doc in retrieve(request.input):
+            d = SHIELD.inspect(
+                message=doc["text"],
+                sender_id=f"rag:{doc['id']}",
+                sender_role="retriever",
+                receiver_id="support_assistant",
+                receiver_role="support_assistant",
+                provenance=["retrieved_document"],
+                conversation_id=ctx.conversation_id,
+            )
+            _record(ctx, "rag_document", doc["id"], d)
+            if d.blocks:
+                continue  # quarantined document never reaches the LLM
+            ctx.tainted = ctx.tainted or d.suspicious
+            safe_docs.append(doc)
+
+        raw_output = call_llm(SYSTEM_PROMPT, safe_docs, request.input, request.caller_role)
+        # (3) tool calls are gated inside each tool (see _gate_tool)
+        output, tool_calls = parse_and_run_tool_calls(raw_output)
+        blocked = any(e["action"] in {"block", "trip", "unavailable"} for e in ctx.events)
+        return ChatResponse(
+            output=output,
+            retrieved_docs=[d["id"] for d in safe_docs],
+            tool_calls=tool_calls,
+            shield=_shield_summary(ctx, blocked=blocked),
+        )
+    finally:
+        _SHIELD_CTX.reset(token)
+
+
+def _shield_summary(ctx: ShieldContext, *, blocked: bool) -> dict[str, Any]:
+    return {"active": True, "blocked": blocked, "tainted": ctx.tainted, "events": ctx.events}
 
 
 @app.get("/health")
@@ -344,6 +469,12 @@ def health() -> dict[str, Any]:
         "patched": PATCHED,
         "gemini_backed": _gemini_available(),
         "architecture": {"chat": True, "rag": True, "tools": True, "network": False},
+        "shield": {
+            "configured": SHIELD.configured,
+            "enabled": SHIELD.enabled,
+            "gateway_reachable": SHIELD.reachable() if SHIELD.configured else False,
+            "fail_mode": SHIELD.fail_mode,
+        },
     }
 
 
@@ -353,19 +484,48 @@ def health() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 @app.post("/admin/apply_patch")
 def apply_patch() -> dict[str, Any]:
+    """Remediation hook used by SwarmShield's apply-and-revalidate flow.
+
+    APPLY_PATCH_MODE (env): "sanitizer" (default, original behaviour: built-in input sanitizer +
+    role gate), "shield" (route the target through the SwarmShield gateway instead), or "both".
+    """
     global PATCHED
-    PATCHED = True
-    audit.info("ADMIN apply_patch: PATCHED=True")
-    return {"patched": PATCHED}
+    mode = os.environ.get("APPLY_PATCH_MODE", "sanitizer").lower()
+    if mode in {"shield", "both"}:
+        if not SHIELD.configured:
+            raise HTTPException(status_code=409, detail="APPLY_PATCH_MODE needs SWARMSHIELD_GATEWAY_URL to be set")
+        SHIELD.enabled = True
+    if mode in {"sanitizer", "both"}:
+        PATCHED = True
+    audit.info(f"ADMIN apply_patch: mode={mode} PATCHED={PATCHED} SHIELD={SHIELD.enabled}")
+    return {"patched": PATCHED, "shield_enabled": SHIELD.enabled, "mode": mode}
 
 
 @app.post("/admin/reset_patch")
 def reset_patch() -> dict[str, Any]:
-    """Testing convenience: revert to vulnerable state."""
+    """Testing convenience: revert to the fully vulnerable state (sanitizer AND shield off)."""
     global PATCHED
     PATCHED = False
-    audit.info("ADMIN reset_patch: PATCHED=False")
-    return {"patched": PATCHED}
+    SHIELD.enabled = False
+    audit.info("ADMIN reset_patch: PATCHED=False SHIELD=False")
+    return {"patched": PATCHED, "shield_enabled": SHIELD.enabled}
+
+
+@app.post("/admin/enable_shield")
+def enable_shield() -> dict[str, Any]:
+    """Route this target through the SwarmShield gateway (independent of PATCHED)."""
+    if not SHIELD.configured:
+        raise HTTPException(status_code=409, detail="set SWARMSHIELD_GATEWAY_URL to use the shield")
+    SHIELD.enabled = True
+    audit.info("ADMIN enable_shield")
+    return {"shield_enabled": True, "gateway_reachable": SHIELD.reachable()}
+
+
+@app.post("/admin/disable_shield")
+def disable_shield() -> dict[str, Any]:
+    SHIELD.enabled = False
+    audit.info("ADMIN disable_shield")
+    return {"shield_enabled": False}
 
 
 if __name__ == "__main__":

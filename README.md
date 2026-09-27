@@ -1,790 +1,411 @@
 # SwarmShield
 
-### Autonomous AI Red-Team & Security Validation Platform
+### Autonomous AI Red-Team & Runtime Security Platform
 
-SwarmShield is an autonomous, multi-agent security testing platform for **authorized AI systems and agentic applications**. It discovers an AI target's attack surface, plans and executes adversarial tests, evaluates evidence, learns from previous attempts, builds attack intelligence, generates remediation, and can revalidate whether a vulnerability was actually fixed.
+SwarmShield is a security platform for **authorized AI and multi-agent systems**. It combines autonomous red-team testing with a runtime security gateway that inspects agent-to-agent communication, enforces tool/role policies, detects prompt injection, and stops runaway agent delegation.
 
-> **Authorized testing only.** SwarmShield requires an explicit authorization attestation before a target can be scanned. Read-only operation is the safe default, while live patch application, branch writes, and pull-request creation are independently permission-gated.
-
----
+> **Authorized testing only.** Use SwarmShield only against systems you own or are explicitly authorized to security-test.
 
 ## Overview
 
-SwarmShield treats an AI application as a security boundary rather than simply testing a conventional HTTP endpoint.
-
 ```text
-                         ┌──────────────────────────┐
-                         │      Target Registry      │
-                         │ URL + Auth + Tools +     │
-                         │ Policy + Access Controls │
-                         └────────────┬─────────────┘
-                                      │
-                                      ▼
-                         ┌──────────────────────────┐
-                         │   Capability Discovery    │
-                         │   Attack Surface Mapping  │
-                         └────────────┬─────────────┘
-                                      │
-                                      ▼
-                         ┌──────────────────────────┐
-                         │      Planner Agent        │
-                         │ Prioritizes attack paths  │
-                         └────────────┬─────────────┘
-                                      │
-                    ┌─────────────────┼─────────────────┐
-                    ▼                 ▼                 ▼
-              Prompt Injection   Jailbreak          Tool Abuse
-              Specialist         Specialist         Specialist
-                    │                 │                 │
-                    └─────────────────┼─────────────────┘
-                                      ▼
-                           ┌─────────────────────┐
-                           │    Target System    │
-                           └──────────┬──────────┘
-                                      ▼
-                           ┌─────────────────────┐
-                           │   Sentinel Agent    │
-                           │ Evidence + Verdict  │
-                           └──────────┬──────────┘
-                                      ▼
-                         ┌──────────────────────────┐
-                         │ Memory + Attack DNA +    │
-                         │ Attack Graph + Risk      │
-                         └────────────┬─────────────┘
-                                      ▼
-                         ┌──────────────────────────┐
-                         │ Remediation + Auto PR    │
-                         │ + Revalidation           │
-                         └──────────────────────────┘
+                    SWARMSHIELD
+                         |
+          +--------------+--------------+
+          |                             |
+   AUTONOMOUS RED TEAM            RUNTIME SHIELD
+          |                             |
+      Planner                       A2A Gateway
+          |                             |
+   +------+-------+             +-------+-------+
+   |      |       |             |       |       |
+Prompt  Jailbreak Tool       Injection  RBAC  Circuit
+Inject  Specialist Abuse     Detection Policy Breaker
+   |      |       |             |       |       |
+   +------+-------+             +-------+-------+
+          |                             |
+       Sentinel                    ALLOW / FLAG /
+          |                       BLOCK / TRIP
+          +-------------+---------------+
+                        |
+                 Patch & Revalidate
 ```
 
----
+### Security lifecycle
+
+**Discover -> Attack -> Detect -> Protect -> Patch -> Revalidate**
 
 ## Core Capabilities
 
-### 🤖 Multi-Agent Security Testing
+### Autonomous Red-Team Scanning
 
-The backend contains a coordinated swarm consisting of:
+The security swarm includes:
 
-- Planner Agent
-- Sentinel Agent
-- Remediation Agent
+- Planner
+- Sentinel
 - Prompt Injection Specialist
 - Jailbreak Specialist
 - Tool Abuse Specialist
 - Data Exfiltration Specialist
 - Privilege Escalation Specialist
-- Orchestrator for campaign execution and adaptive retries
+- Orchestrator
+- Remediation workflow
 
-Agents operate against the registered target and persist their findings and attack lineage in PostgreSQL.
+The Planner identifies attack paths and delegates tests to specialists. The Sentinel evaluates target responses and evidence before a vulnerability is confirmed.
 
-### 🧠 Capability Intelligence
+### Runtime A2A Security Gateway
 
-SwarmShield analyzes the target's declared and observed capabilities to identify:
-
-- exposed tools
-- authorization boundaries
-- sensitive resources
-- capability relationships
-- potential multi-hop attack paths
-- coverage gaps
-- historical attack signals
-- attack hypotheses
-
-Capability graphs and attack paths are exposed through the API and surfaced through the intelligence UI.
-
-### 🧬 Shared Memory & Attack DNA
-
-The swarm persists campaign intelligence so later attempts can use previous outcomes.
-
-Attack DNA records track:
-
-- attack vector lineage
-- parent attempts
-- generations
-- mutations
-- success probability
-- confidence
-- mutation-driven retries
-
-This enables adaptive testing instead of repeatedly sending identical payloads.
-
-### 🔎 Evidence-Based Findings
-
-Findings are generated from the target's actual responses and persisted attack evidence.
-
-The Sentinel evaluates:
-
-- target response
-- attack vector
-- security policy
-- tool/capability context
-- previous attack information
-
-Findings are categorized using OWASP LLM-oriented categories and include severity, evidence, status, and remediation state.
-
-### 📚 Local RAG & Persistent Intelligence
-
-SwarmShield includes a local knowledge layer backed by PostgreSQL.
-
-The RAG implementation provides:
-
-- persistent knowledge documents
-- embeddings
-- metadata filtering
-- lexical + cosine-similarity hybrid retrieval
-- bounded retrieval per scan
-- secret-material rejection during ingestion
-
-If a local sentence-transformer model is unavailable, the embedding service falls back to a deterministic hashing-vector representation rather than downloading a model automatically.
-
-The repository currently includes an explicit knowledge-ingestion CLI with curated OWASP/CWE content. External CVE or Exploit-DB corpora are **not automatically ingested by the current implementation**.
-
-### ⚡ Local-First LLM Routing
-
-LLM generation follows a local-first routing strategy:
+Agent-to-agent transfers can pass through the SwarmShield gateway before reaching the receiving agent.
 
 ```text
-Cache
-  ↓
-Local LLM
-  ↓
-Confidence / retrieval evaluation
-  ↓
-Optional cloud fallback
-  ↓
-Deterministic fallback engine
+Agent A
+   |
+   | A2A transfer
+   v
+SwarmShield Gateway
+   |
+   +-- Prompt-injection detection
+   +-- Role/tool authorization
+   +-- Security state
+   +-- Circuit breaker
+   |
+   +--> ALLOW
+   +--> FLAG / HUMAN REVIEW
+   +--> BLOCK / HTTP 403
+   +--> CIRCUIT BREAK / HTTP 429
 ```
 
-Supported cloud/provider boundaries include Gemini and an optional Grok-compatible provider.
+### Prompt Injection Detection
 
-The local provider boundary currently supports **Ollama**.
+SwarmShield detects malicious instructions embedded in untrusted content, including indirect prompt injection arriving through retrieved or external content.
 
-The deterministic fallback engine allows the system to continue operating without a cloud API key.
+### RBAC / Tool Authorization
 
-### 🛡️ Read-Only by Default
+The gateway evaluates sender/receiver roles and tool permissions so unauthorized tool activity can be blocked before execution.
 
-Each target has an independent operational access mode:
+### Recursive-Agent Circuit Breaker
 
-| Permission | Default | Purpose |
-|---|---:|---|
-| `authorized` | `false` | Explicit authorization to security-test the target |
-| `READ_ONLY` | ✅ | Safe default operational mode |
-| `allow_direct_patch_apply` | ❌ | Explicit permission to modify the live target |
-| `allow_pr_creation` | ❌ | Explicit permission to create a GitHub remediation PR |
-| `allow_branch_write` | ❌ | Explicit permission to create a remediation branch |
-| `code_visibility` | `unknown` | Public/private/unknown repository visibility |
-
-Read-only mode still permits discovery, scanning, attack execution, finding generation, remediation generation, reporting, and revalidation **without applying a live patch**.
-
-Direct patch application requires both:
+Repeated A2A delegation is tracked across a conversation. A runaway loop can be terminated with HTTP 429.
 
 ```text
-access_mode = READ_WRITE
-AND
-allow_direct_patch_apply = true
+A -> B  ALLOW
+B -> A  ALLOW
+A -> B  ALLOW
+B -> A  ALLOW
+A -> B  ALLOW
+B -> A  HTTP 429
+          |
+     Circuit Breaker
+          |
+       Loop stopped
 ```
 
-PR creation is independently gated and does not require live target write access.
-
-### 🔧 Remediation & Auto PRs
-
-For confirmed findings, SwarmShield can generate a remediation artifact containing:
-
-- vulnerability
-- patch
-- patch type
-- summary
-- root-cause explanation
-- suggested change
-
-When GitHub integration is explicitly configured and PR creation is permitted, SwarmShield can:
-
-1. create a remediation branch
-2. commit the remediation artifact
-3. open a pull request
-4. return the PR URL and metadata
-
-**SwarmShield never auto-merges the PR.** Human review and merge remain required.
-
-### 🔁 Revalidation
-
-Revalidation is designed to verify remediation rather than simply changing a database status.
-
-The flow can:
-
-1. select the vulnerability's original successful attack
-2. optionally apply the generated patch
-3. replay the original winning payload
-4. evaluate the new target response
-5. record whether the vulnerability remains exploitable
-6. update the vulnerability's revalidation status
-
-For read-only targets, revalidation can still be performed with `apply=false` without writing to the target.
-
----
-
-## Target Model
-
-A target is registered with:
-
-- name
-- endpoint URL
-- optional authentication header
-- declared tools
-- permission/security policy
-- authorization attestation
-- operational access mode
-- code visibility
-- remediation permissions
-
-The generic target adapter sends:
-
-```json
-{
-  "input": "attack payload"
-}
-```
-
-and accepts common response shapes such as:
-
-```json
-{
-  "output": "target response"
-}
-```
-
-The adapter also supports common fields such as `response`, `text`, `message`, `reply`, and `content`.
-
-This keeps the target interface intentionally thin so the platform can test different AI/agent endpoints.
-
----
-
-## Security Policy Awareness
-
-A target can declare security expectations through its `permission_map`.
-
-Example:
-
-```json
-{
-  "tools": {
-    "execute_admin_action": {
-      "restriction": "admin_only"
-    },
-    "send_email": {
-      "restriction": "external_recipients_restricted"
-    },
-    "read_file": {
-      "restriction": "restricted_paths",
-      "restricted_paths": [
-        "internal_notes.txt"
-      ]
-    }
-  },
-  "protected_resources": [
-    "internal_notes",
-    "customer_data",
-    "confidential_pricing"
-  ],
-  "policies": [
-    "no_unauthorized_tool_execution",
-    "no_privilege_escalation",
-    "no_confidential_exfiltration",
-    "detect_prompt_injection"
-  ]
-}
-```
-
-The policy layer is deliberately lightweight. It is **not an RBAC system**. Its purpose is to give the Planner and Sentinel target-specific security context so confirmed findings can be explained against the target's own declared restrictions.
-
----
-
-## Controlled Target
-
-The repository includes an authorized local controlled target for demonstrations and development.
-
-Architecture:
+### Patch & Revalidation
 
 ```text
-User → LLM → RAG → Mock Tools
+Finding
+   |
+Remediation
+   |
+Patch
+   |
+Replay / Revalidate
+   |
+Verify whether vulnerability remains exploitable
 ```
 
-The controlled target intentionally models vulnerabilities such as:
+## Runtime Attack Simulation
 
-- indirect prompt injection through retrieved content
-- unsafe tool permissions
-- sensitive information disclosure
-- data exfiltration
-- direct prompt injection
+The repository includes an executable demonstration against the actual SwarmShield gateway.
 
-It exposes patch/reset hooks used by the revalidation workflow.
+```cmd
+python -m swarmshield.tests.simulate_attacks
+```
 
-The controlled target runs locally and is designed for safe testing rather than testing an unrelated production system.
+### Scenario A — Indirect Prompt Injection
 
----
+Untrusted web content contains an injected instruction attempting an unauthorized database operation.
 
-## User Interface
-
-The current frontend is a React/Tailwind dashboard with a dark, glass-style security operations interface.
-
-### Command Center
-
-The dashboard provides a high-level view of:
-
-- security score
-- active agents
-- registered targets
-- vulnerabilities
-- critical findings
-- autonomous agent activity
-
-![SwarmShield Command Center](docs/screenshots/dashboard.png)
-
-### War Room & Live Siege
-
-The siege workflow gives the scan a real-time operational view with:
-
-- target status
-- attack agents
-- attack attempts
-- discovered breaches
-- battle plan
-- battle log
-- live scan state
-- outcome navigation
-
-![SwarmShield War Room](docs/screenshots/war-room.png)
-
-![SwarmShield Live Siege](docs/screenshots/live-siege.png)
-
-### Vulnerability Management
-
-Confirmed vulnerabilities are grouped by severity and OWASP category, with evidence-driven finding details and a direct path into remediation.
-
-![SwarmShield Vulnerabilities](docs/screenshots/vulnerabilities.png)
-
-### Remediation / Patch Center
-
-The Patch Center presents generated remediation work and routes it according to the target's configured permissions.
-
-![SwarmShield Patch Center](docs/screenshots/patch-center.png)
-
----
-
-## Main UI Areas
-
-The frontend currently exposes the following operational areas:
-
-- Dashboard
-- AI Agents
-- Targets / Realm Registry
-- Vulnerabilities / Siege Report
-- Patch Center / Remediation Forge
-- Intelligence
-- Reports
-- War Room
-- Live Siege
-- Outcome
-- War Log
-- Auto PR
-- Revalidation
-- Settings
-
-The siege-oriented screens use the project's terminology:
-
-| UI term | Meaning |
-|---|---|
-| Realm | Registered target |
-| Siege | Security scan |
-| Fortress Integrity | Security/risk score |
-| Breach | Confirmed vulnerability |
-| Ward | Remediation |
-| War Room | Pre-/during-scan operational view |
-| Live Siege | Live campaign activity |
-
----
-
-## Technology Stack
-
-| Component | Technology |
-|---|---|
-| Frontend | React 18 |
-| Styling | Tailwind CSS |
-| Motion | Framer Motion |
-| State | Zustand |
-| Graph visualization | React Flow |
-| Backend | FastAPI |
-| ORM | SQLAlchemy |
-| Database | PostgreSQL 16 |
-| Live updates | Server-Sent Events |
-| HTTP client | HTTPX |
-| Cloud LLM | Google Gemini |
-| Local LLM | Ollama |
-| Local RAG | PostgreSQL + persisted embeddings |
-| Optional repository integration | GitHub API |
-| Containerization | Docker Compose |
-
----
-
-## Repository Structure
+Expected:
 
 ```text
-SwarmShield_v2/
-├── backend/
-│   ├── app/
-│   │   ├── agents/
-│   │   │   ├── specialists/
-│   │   │   ├── orchestrator.py
-│   │   │   ├── planner.py
-│   │   │   ├── remediation.py
-│   │   │   └── sentinel.py
-│   │   ├── api/routes/
-│   │   ├── capability/
-│   │   ├── core/
-│   │   ├── db/
-│   │   ├── models/
-│   │   ├── schemas/
-│   │   └── services/
-│   ├── tests/
-│   ├── Dockerfile
-│   └── requirements.txt
-│
-├── controlled_target/
-│   ├── app.py
-│   ├── Dockerfile
-│   └── requirements.txt
-│
-├── frontend/
-│   ├── src/
-│   ├── public/
-│   ├── Dockerfile
-│   ├── nginx.conf
-│   └── package.json
-│
-├── docker-compose.yml
-└── .env.example
+SwarmShield INTERCEPTED the transfer (HTTP 403)
 ```
 
----
+The receiving agent does not receive the blocked payload.
 
-## Running with Docker
+### Scenario B — Recursive A2A Loop
 
-### 1. Configure the environment
+Two agents repeatedly delegate the same task to each other.
 
-Copy the example environment file:
+Expected:
 
-**Windows CMD**
+```text
+hop 1  ALLOW
+hop 2  ALLOW
+hop 3  ALLOW
+hop 4  ALLOW
+hop 5  ALLOW
+hop 6  HTTP 429
+```
 
-```bat
+The stateful circuit breaker identifies the recursive delegation pattern and terminates the loop.
+
+## LangChain Integration
+
+Native integration:
+
+```text
+swarmshield/integrations/langchain.py
+```
+
+```text
+LangChain Agent
+      |
+SwarmShield Middleware
+      |
+Gateway /a2a/transfer
+      |
+Security Decision
+```
+
+The adapter can inspect inbound messages, proposed tool calls, and tool/retrieval outputs before the model consumes them.
+
+**Verified with LangChain 1.4.2.**
+
+## LangGraph Integration
+
+Native integration:
+
+```text
+swarmshield/integrations/langgraph.py
+```
+
+The adapter adds a SwarmShield gate to a LangGraph `StateGraph`.
+
+```text
+LangGraph StateGraph
+        |
+ SwarmShield Gate
+        |
+   +----+---------+
+   |              |
+ ALLOW          FLAG/BLOCK
+                  |
+             interrupt()
+                  |
+             Human Review
+```
+
+It supports synchronous and asynchronous invocation, human-in-the-loop interruption, quarantine, RBAC hard stops, and recursive graph/delegation protection.
+
+**Verified with LangGraph 1.2.11.**
+
+> LangChain and LangGraph are integrations used by agent applications. They are intentionally not installed inside the framework-agnostic gateway container.
+
+## Integration Testing
+
+Run the complete integration suite against a running gateway:
+
+```cmd
+set SWARMSHIELD_TEST_GATEWAY_URL=http://localhost:8100
+pytest swarmshield\tests -v
+```
+
+Verified result:
+
+```text
+27 passed
+```
+
+Coverage includes gateway behavior, prompt injection, circuit breaker, failure modes, LangChain, LangGraph, RBAC, human review, and recursive graph protection.
+
+## Docker Deployment
+
+Start the stack:
+
+```cmd
 copy .env.example .env
-```
-
-**PowerShell**
-
-```powershell
-Copy-Item .env.example .env
-```
-
-At minimum, the stack can run without a Gemini API key by using the deterministic fallback path.
-
-Optional integrations include:
-
-- Gemini
-- Ollama/local LLM
-- GitHub remediation PRs
-- Grok-compatible cloud routing
-
-### 2. Start the complete stack
-
-```bash
 docker compose up --build
 ```
 
-The default services are:
-
-| Service | Address |
-|---|---|
-| Frontend | `http://localhost:5173` |
-| API | `http://localhost:8000` |
-| Controlled target | `http://localhost:9100` |
-| PostgreSQL | `localhost:5432` |
-
-### 3. Stop the stack
-
-```bash
-docker compose down
-```
-
-To remove the PostgreSQL volume as well:
-
-```bash
-docker compose down -v
-```
-
-> Removing the volume deletes the local SwarmShield database and scan history.
-
----
-
-## Local Frontend Development
-
-From `frontend/`:
-
-```bash
-npm install
-npm run dev
-```
-
-The Vite development server normally runs at:
+Open:
 
 ```text
 http://localhost:5173
 ```
 
-Build the production frontend with:
+### Services
 
-```bash
-npm run build
-```
+| Service | Port | Purpose |
+|---|---:|---|
+| frontend | 5173 | React/Nginx security dashboard |
+| api | 8000 | FastAPI platform API |
+| swarmshield-gateway | 8100 | Runtime A2A security gateway |
+| controlled-target | 9100 | Local authorized demo target |
+| db | 5432 | PostgreSQL |
 
----
-
-## Local Backend Development
-
-Create and activate a Python virtual environment, install dependencies, configure PostgreSQL, and start FastAPI:
-
-```bash
-cd backend
-
-python -m venv venv
-```
-
-**Windows**
-
-```bat
-venv\Scripts\activate
-```
-
-Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-Start the API:
-
-```bash
-uvicorn app.main:app --reload --port 8000
-```
-
----
-
-## Environment Variables
-
-Important configuration is loaded through environment variables.
-
-### Core
-
-```env
-DATABASE_URL=postgresql+psycopg2://swarmshield:swarmshield@localhost:5432/swarmshield
-```
-
-### Gemini
-
-```env
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.0-flash
-```
-
-### Local LLM
-
-```env
-LLM_PROVIDER=auto
-LOCAL_LLM_ENABLED=true
-LOCAL_LLM_PROVIDER=ollama
-LOCAL_LLM_MODEL=
-LOCAL_LLM_BASE_URL=http://localhost:11434
-```
-
-### RAG / Intelligence
-
-```env
-RAG_ENABLED=true
-RAG_TOP_K=6
-EMBEDDING_MODEL=all-MiniLM-L6-v2
-MEMORY_ENABLED=true
-LLM_CACHE_ENABLED=true
-```
-
-### GitHub Auto PR
-
-```env
-GITHUB_TOKEN=
-GITHUB_REPO=
-GITHUB_BASE_BRANCH=main
-```
-
-Use a least-privilege GitHub token appropriate to the single repository being remediated. SwarmShield does not store credentials in source code.
-
----
-
-## API Surface
-
-The backend exposes routes for:
-
-- `/api/targets`
-- `/api/scans`
-- `/api/vulnerabilities`
-- `/api/patches`
-- `/api/scans/{scan_id}/stream`
-- `/api/scans/{scan_id}/graph`
-- `/api/scans/{scan_id}/memory`
-- `/api/scans/{scan_id}/attack-dna`
-- `/api/targets/{target_id}/capabilities`
-- `/api/rag/search`
-- `/api/memory/search`
-- `/api/llm/health`
-- vulnerability revalidation
-- remediation PR operations
-
-The exact route definitions live under:
+Health endpoints:
 
 ```text
-backend/app/api/routes/
+http://localhost:8100/health
+http://localhost:9100/health
 ```
 
-FastAPI's interactive documentation is available when the API is running:
+Stop:
+
+```cmd
+docker compose down
+```
+
+## Controlled Target
+
+The repository includes a local authorized target for demonstrations and development.
 
 ```text
-http://localhost:8000/docs
+Chat
+ |
+ +-- RAG
+ |
+ +-- Tools
 ```
+
+It provides a safe environment for demonstrating prompt injection, tool authorization, information disclosure, and runtime shielding.
+
+## Security Dashboard
+
+The frontend provides:
+
+- Autonomous scan activity
+- Agent activity
+- Vulnerability findings
+- Runtime security events
+- Agent/security topology
+- Patch/remediation state
+- Revalidation results
+
+The Security view uses React Flow to visualize agent communication and security state.
+
+Add project screenshots/GIFs under `docs/screenshots/` and reference them here.
+
+## Technology Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React |
+| Styling | Tailwind CSS |
+| Visualization | React Flow |
+| Backend | FastAPI |
+| Database | PostgreSQL 16 |
+| ORM | SQLAlchemy |
+| Runtime HTTP | HTTPX |
+| Live events | Server-Sent Events |
+| Containerization | Docker Compose |
+| Agent integration | LangChain 1.4.2 |
+| Agent integration | LangGraph 1.2.11 |
+| Local LLM boundary | Ollama |
+| Cloud LLM boundary | Gemini / optional provider |
+| Testing | Pytest |
+
+## Repository Structure
+
+```text
+SwarmShield/
+├── backend/
+├── controlled_target/
+├── frontend/
+├── swarmshield/
+│   ├── gateway.py
+│   ├── integrations/
+│   │   ├── langchain.py
+│   │   ├── langgraph.py
+│   │   └── _client.py
+│   ├── policies/
+│   └── tests/
+│       ├── test_client_and_imports.py
+│       ├── test_langchain.py
+│       ├── test_langgraph.py
+│       └── simulate_attacks.py
+├── docs/
+│   ├── DEMO.md
+│   └── INTEGRATIONS.md
+├── scripts/
+├── docker-compose.yml
+├── pyproject.toml
+└── .env.example
+```
+
+## Demo Flow
+
+For a short hackathon demonstration:
+
+1. Start the Docker stack.
+2. Run the autonomous red-team scan.
+3. Show Planner -> Specialists -> Sentinel -> findings.
+4. Open Runtime Security and show the agent topology.
+5. Demonstrate indirect prompt injection -> HTTP 403.
+6. Demonstrate recursive A2A loop -> HTTP 429.
+7. Apply remediation and revalidate.
+8. Mention native LangChain and LangGraph integrations.
+
+The central story is:
+
+```text
+Autonomous Attack
+       |
+       v
+Vulnerability Found
+       |
+       v
+Runtime Protection
+       |
+       v
+Attack Blocked
+       |
+       v
+Patch
+       |
+       v
+Revalidate
+```
+
+## Configuration
+
+Copy the example environment:
+
+```cmd
+copy .env.example .env
+```
+
+Keep secrets out of source control. Optional integrations include Gemini, Ollama/local LLM routing, and GitHub remediation workflows.
+
+## Limitations
+
+SwarmShield is a security research/hackathon platform, not a guarantee of complete AI-system security.
+
+Detection quality depends on configured policies, detectors, target behavior, and available evidence. Production deployments require appropriate authentication, secret management, network isolation, logging, monitoring, and operational controls.
+
+## Project Status
+
+Verified capabilities:
+
+- Autonomous red-team scanning
+- Runtime A2A security gateway
+- Prompt-injection blocking
+- RBAC/tool authorization
+- Stateful recursive-agent circuit breaker
+- Patch and revalidation workflow
+- React Flow security visualization
+- LangChain 1.4.2 integration
+- LangGraph 1.2.11 integration
+- Executable 403/429 attack simulations
+- Docker Compose deployment
+- 27/27 integration/security tests passing
+
+## License
+
+Add the project's applicable license here.
 
 ---
 
-## Operational Flow
-
-A typical campaign is:
-
-```text
-1. Register target
-       ↓
-2. Declare / discover capabilities
-       ↓
-3. Confirm authorization
-       ↓
-4. Launch Siege
-       ↓
-5. Planner creates attack vectors
-       ↓
-6. Specialist agents execute attacks
-       ↓
-7. Sentinel evaluates evidence
-       ↓
-8. Successful attempts enter memory
-       ↓
-9. Failed attempts can mutate and retry
-       ↓
-10. Attack graph + risk are persisted
-       ↓
-11. Remediation is generated
-       ↓
-12. Optional PR / branch / direct patch
-       ↓
-13. Revalidation replays the winning attack
-       ↓
-14. Vulnerability becomes verified fixed
-    or remains vulnerable
-```
-
----
-
-## Safety Model
-
-SwarmShield is intentionally designed around explicit authorization and least privilege.
-
-### Target authorization
-
-A scan is rejected unless:
-
-```text
-authorized = true
-```
-
-### Live target writes
-
-A live patch requires:
-
-```text
-access_mode = READ_WRITE
-allow_direct_patch_apply = true
-```
-
-### GitHub PR creation
-
-PR creation requires:
-
-```text
-allow_pr_creation = true
-```
-
-### Branch writes
-
-Branch remediation requires:
-
-```text
-access_mode = READ_WRITE
-allow_branch_write = true
-```
-
-These controls are enforced server-side. Frontend checkboxes do not grant permissions on their own.
-
----
-
-## Testing
-
-Backend tests are located under:
-
-```text
-backend/tests/
-```
-
-Run them with:
-
-```bash
-cd backend
-pytest
-```
-
-Frontend production build:
-
-```bash
-cd frontend
-npm run build
-```
-
----
-
-## Design Principles
-
-SwarmShield is built around a few core principles:
-
-1. **Attack real behavior, not just static configuration.**
-2. **Treat target responses as evidence.**
-3. **Use adaptive retries instead of repeating identical attacks.**
-4. **Persist attack lineage and memory across the campaign.**
-5. **Separate authorization to test from authorization to modify.**
-6. **Keep remediation reviewable by humans.**
-7. **Verify remediation by replaying the original exploit.**
-8. **Prefer local inference and bounded cloud fallback where configured.**
-9. **Keep retrieved security knowledge as data, never executable instructions.**
-10. **Make the security state visible through an operational interface.**
-
----
-
-## Disclaimer
-
-SwarmShield is a security testing and research platform intended for **systems you own or have explicit authorization to test**.
-
-Do not register or attack third-party systems without permission. The included controlled target exists specifically to provide a safe environment for demonstrations and development.
-
----
+**SwarmShield — discover the weakness, shield the runtime, and verify the fix.**
